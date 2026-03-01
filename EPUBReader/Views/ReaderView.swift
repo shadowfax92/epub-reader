@@ -28,6 +28,12 @@ struct ReaderView: View {
 
     private var theme: ReaderTheme { bookStore.readerTheme }
 
+    private var bookProgressPercent: Int? {
+        guard let total = parsedBook?.totalWords, total > 0 else { return nil }
+        let current = playbackManager.currentGlobalWordIndex
+        return min(100, max(0, current * 100 / total))
+    }
+
     var body: some View {
         ZStack {
             theme.backgroundColor
@@ -304,6 +310,12 @@ struct ReaderView: View {
                             .foregroundStyle(.primary)
                             .frame(width: 48, height: 48)
                     }
+                }
+
+                if let progress = bookProgressPercent {
+                    Text("\(progress)%")
+                        .font(.caption2.weight(.medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer().frame(height: 8)
