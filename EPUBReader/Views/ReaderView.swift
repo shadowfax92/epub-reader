@@ -309,11 +309,13 @@ struct ReaderView: View {
                 if let chapters = parsedBook?.chapters {
                     ForEach(chapters, id: \.index) { chapter in
                         Button {
+                            let targetId = chapter.paragraphs.first?.id
                             showChapterList = false
-                            if let firstParagraph = chapter.paragraphs.first {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            if let targetId {
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(300))
                                     withAnimation(.easeInOut(duration: 0.4)) {
-                                        scrollProxy?.scrollTo(firstParagraph.id, anchor: .top)
+                                        scrollProxy?.scrollTo(targetId, anchor: .top)
                                     }
                                 }
                             }

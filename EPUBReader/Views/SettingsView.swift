@@ -107,18 +107,16 @@ struct SettingsView: View {
                     Text("\(Int(bookStore.fontSize))pt")
                         .foregroundStyle(.secondary)
                 }
-                Slider(value: Binding(
-                    get: { bookStore.fontSize },
-                    set: { bookStore.fontSize = $0 }
-                ), in: 12...32, step: 1)
+                Slider(
+                    value: fontSizeBinding,
+                    in: 12...32,
+                    step: 1
+                )
 
                 HStack {
                     Text("Reading Mode")
                     Spacer()
-                    Picker("", selection: Binding(
-                        get: { bookStore.isPagedMode },
-                        set: { bookStore.isPagedMode = $0 }
-                    )) {
+                    Picker("", selection: pagedModeBinding) {
                         Text("Scroll").tag(false)
                         Text("Paged").tag(true)
                     }
@@ -140,6 +138,14 @@ struct SettingsView: View {
                 Task { await loadVoices() }
             }
         }
+    }
+
+    private var fontSizeBinding: Binding<Double> {
+        Binding(get: { bookStore.fontSize }, set: { bookStore.fontSize = $0 })
+    }
+
+    private var pagedModeBinding: Binding<Bool> {
+        Binding(get: { bookStore.isPagedMode }, set: { bookStore.isPagedMode = $0 })
     }
 
     private func loadVoices() async {

@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 class BookStore: ObservableObject {
     @Published var books: [BookMetadata] = []
 
