@@ -49,13 +49,15 @@ final class ReadiumService {
     func makeNavigator(
         publication: Publication,
         initialLocation: Locator?,
-        preferences: EPUBPreferences = .empty
+        preferences: EPUBPreferences = .empty,
+        editingActions: [EditingAction] = EditingAction.defaultActions
     ) throws -> EPUBNavigatorViewController {
         try EPUBNavigatorViewController(
             publication: publication,
             initialLocation: initialLocation,
             config: EPUBNavigatorViewController.Configuration(
-                preferences: preferences
+                preferences: preferences,
+                editingActions: editingActions
             ),
             httpServer: httpServer
         )

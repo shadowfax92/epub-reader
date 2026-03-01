@@ -46,3 +46,14 @@ targets:
         product: ReadiumNavigator
       - package: swift-toolkit
         product: ReadiumAdapterGCDWebServer
+
+  EPUBReaderTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [EPUBReaderTests]
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: "YES"
+    dependencies:
+      - target: EPUBReader

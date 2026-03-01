@@ -10,9 +10,11 @@
 		101709F650D9C74F15BA777D /* ElevenLabsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A42C62234F8995A951AEB8B /* ElevenLabsService.swift */; };
 		1734CB6A6E8C2FACE21629F8 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A2D4A313666A4D493174F12 /* ReaderView.swift */; };
 		17DE1C7A7BD2680971BF4475 /* ReadiumService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB0D8D9E48BD40246619D80 /* ReadiumService.swift */; };
+		1E037CC7B22DE99549511CD5 /* TTSHighlightHelperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4740C85F149A30DE1FBBD7FE /* TTSHighlightHelperTests.swift */; };
 		1F95B870B78E615AB3535D4D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4D3784CA2978ED65D6818863 /* Assets.xcassets */; };
 		490AD5683F1E8117210ADA16 /* ReadiumReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D757BBA859CACB283ECC9533 /* ReadiumReaderView.swift */; };
 		50C1BDE27582540A0D8CA267 /* AudioPlaybackManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 803C391E9257F2B72D408495 /* AudioPlaybackManager.swift */; };
+		5A00B4FC73FB66D666DDD098 /* TTSHighlightHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 515BDFC4571487A438A9FABF /* TTSHighlightHelper.swift */; };
 		5A54FA753D70489C180836CB /* BookStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E222C91BB3C6BB4728DE80DD /* BookStore.swift */; };
 		74C6F1569226488853E9B03C /* EPUBParserService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0585283C7FCD0CC23D4B72A /* EPUBParserService.swift */; };
 		79B64FCDF95719C1984D1326 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = 69C17F8441D9B4AA09CCB71E /* ReadiumShared */; };
@@ -25,8 +27,21 @@
 		FBE6853C65A9822394D425D0 /* Book.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A07AF8E6C5438C2EAC2D00 /* Book.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		4127F33AED520E1967AB2624 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7938BA6FA88E015FAF5C1397 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E7D493C39D8564B6DF1E7C69;
+			remoteInfo = EPUBReader;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		4740C85F149A30DE1FBBD7FE /* TTSHighlightHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSHighlightHelperTests.swift; sourceTree = "<group>"; };
 		4D3784CA2978ED65D6818863 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		512B74881354E3CEEC33024F /* EPUBReaderTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EPUBReaderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		515BDFC4571487A438A9FABF /* TTSHighlightHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSHighlightHelper.swift; sourceTree = "<group>"; };
 		5D79AC2E138A4BEAE46E5BE4 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		5EA43EAC7B6FD78876267B56 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		6A2106781EFB3E019745CD97 /* EPUBReader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EPUBReader.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -57,10 +72,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		13C23C24DACA4550140B11FF /* EPUBReaderTests */ = {
+			isa = PBXGroup;
+			children = (
+				4740C85F149A30DE1FBBD7FE /* TTSHighlightHelperTests.swift */,
+			);
+			path = EPUBReaderTests;
+			sourceTree = "<group>";
+		};
 		1D404561CEAA7075032D60AE /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				6A2106781EFB3E019745CD97 /* EPUBReader.app */,
+				512B74881354E3CEEC33024F /* EPUBReaderTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -89,6 +113,7 @@
 			isa = PBXGroup;
 			children = (
 				D7E6F595AC2639B1D00B606D /* EPUBReader */,
+				13C23C24DACA4550140B11FF /* EPUBReaderTests */,
 				1D404561CEAA7075032D60AE /* Products */,
 			);
 			sourceTree = "<group>";
@@ -110,6 +135,7 @@
 				4D3784CA2978ED65D6818863 /* Assets.xcassets */,
 				A5DC7AA80E68BCE5CDAC91BF /* EPUBReaderApp.swift */,
 				C691393151F57E0CEC34D659 /* Info.plist */,
+				DA3C4547B5EF5E36B834A067 /* Helpers */,
 				415EB50A78A1322D0ABFFD10 /* Models */,
 				5E8AD5EC0DB2915E1CE9C58B /* Services */,
 				9B8F4FADF8BD9F91190086A6 /* Views */,
@@ -117,9 +143,35 @@
 			path = EPUBReader;
 			sourceTree = "<group>";
 		};
+		DA3C4547B5EF5E36B834A067 /* Helpers */ = {
+			isa = PBXGroup;
+			children = (
+				515BDFC4571487A438A9FABF /* TTSHighlightHelper.swift */,
+			);
+			path = Helpers;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		1848AAA221619F1D6A2A35B8 /* EPUBReaderTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 68C0FE2EC35EEB726EF7CB2F /* Build configuration list for PBXNativeTarget "EPUBReaderTests" */;
+			buildPhases = (
+				14A012CD47099439D44F4966 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B01257985FA3513BD26E8BFC /* PBXTargetDependency */,
+			);
+			name = EPUBReaderTests;
+			packageProductDependencies = (
+			);
+			productName = EPUBReaderTests;
+			productReference = 512B74881354E3CEEC33024F /* EPUBReaderTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		E7D493C39D8564B6DF1E7C69 /* EPUBReader */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = FDDF113E8D11073F515BE73F /* Build configuration list for PBXNativeTarget "EPUBReader" */;
@@ -174,6 +226,7 @@
 			projectRoot = "";
 			targets = (
 				E7D493C39D8564B6DF1E7C69 /* EPUBReader */,
+				1848AAA221619F1D6A2A35B8 /* EPUBReaderTests */,
 			);
 		};
 /* End PBXProject section */
@@ -205,12 +258,47 @@
 				490AD5683F1E8117210ADA16 /* ReadiumReaderView.swift in Sources */,
 				17DE1C7A7BD2680971BF4475 /* ReadiumService.swift in Sources */,
 				9E847438A5BA225FBB400BE4 /* SettingsView.swift in Sources */,
+				5A00B4FC73FB66D666DDD098 /* TTSHighlightHelper.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		14A012CD47099439D44F4966 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1E037CC7B22DE99549511CD5 /* TTSHighlightHelperTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		B01257985FA3513BD26E8BFC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E7D493C39D8564B6DF1E7C69 /* EPUBReader */;
+			targetProxy = 4127F33AED520E1967AB2624 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		3EF35411753C9DDAEA94B1D8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.personal.EPUBReaderTests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/EPUBReader.app/EPUBReader";
+			};
+			name = Debug;
+		};
 		6FEBC374316DEE5F3084EABE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -352,6 +440,24 @@
 			};
 			name = Debug;
 		};
+		C67787DEC3CEC3B20A367823 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.personal.EPUBReaderTests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/EPUBReader.app/EPUBReader";
+			};
+			name = Release;
+		};
 		D9D6A325684295D880EE99B0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -382,6 +488,15 @@
 			buildConfigurations = (
 				BF9682290513D9A5503F727F /* Debug */,
 				7AB9F0822A158FC00DB6F61E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		68C0FE2EC35EEB726EF7CB2F /* Build configuration list for PBXNativeTarget "EPUBReaderTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3EF35411753C9DDAEA94B1D8 /* Debug */,
+				C67787DEC3CEC3B20A367823 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

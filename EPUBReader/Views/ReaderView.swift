@@ -22,6 +22,8 @@ struct ReaderView: View {
     @State private var lastScrolledResourceHref: String?
     @State private var lastScrolledParagraphId: Int = -1
     @State private var lastScrollCheckTime: Date = .distantPast
+    @State private var hasTextSelection = false
+    @State private var navigationTask: Task<Void, Never>?
 
     private let speedOptions: [Double] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.5]
 
@@ -33,7 +35,9 @@ struct ReaderView: View {
                 .ignoresSafeArea()
 
             if let navigator {
-                ReadiumReaderView(navigator: navigator)
+                ReadiumReaderView(navigator: navigator, onSpeakFromSelection: { selection in
+                    startTTSFromSelection(selection)
+                })
                     .ignoresSafeArea()
             } else if isLoading {
                 ProgressView("Loading book...")
@@ -113,16 +117,6 @@ struct ReaderView: View {
                             .foregroundStyle(.primary)
                             .frame(width: 40, height: 44)
                     }
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showControls = false
-                        }
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.title3.weight(.medium))
-                            .foregroundStyle(.primary)
-                            .frame(width: 40, height: 44)
-                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -138,6 +132,21 @@ struct ReaderView: View {
                 }
 
             VStack(spacing: 12) {
+                HStack {
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showControls = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+
                 if playbackManager.isLoadingAudio {
                     ProgressView()
                         .tint(Color.accentColor)
@@ -224,6 +233,21 @@ struct ReaderView: View {
                         }
                     }
                     .padding(.horizontal, 20)
+                }
+
+                if hasTextSelection {
+                    Button {
+                        if let nav = navigator, let sel = nav.currentSelection {
+                            startTTSFromSelection(sel)
+                        }
+                    } label: {
+                        Label("Play from selection", systemImage: "text.line.first.and.arrowtriangle.forward")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color.accentColor))
+                            .foregroundStyle(.white)
+                    }
                 }
 
                 // Playback controls
@@ -317,14 +341,21 @@ struct ReaderView: View {
             // Build initial preferences from current theme/font
             let preferences = buildPreferences()
 
+            let speakAction = EditingAction(
+                title: "Speak from Here",
+                action: #selector(ReaderContainerViewController.speakFromHere(_:))
+            )
             let nav = try ReadiumService.shared.makeNavigator(
                 publication: pub,
                 initialLocation: savedLocator(),
-                preferences: preferences
+                preferences: preferences,
+                editingActions: EditingAction.defaultActions + [speakAction]
             )
 
             let delegate = ReaderNavigatorDelegate(
                 onTap: { [self] in
+                    // Update selection state when controls toggle
+                    hasTextSelection = nav.currentSelection != nil
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showControls.toggle()
                     }
@@ -336,6 +367,9 @@ struct ReaderView: View {
                     if let jsonString = locator.jsonString {
                         UserDefaults.standard.set(jsonString, forKey: "locator_\(book.id.uuidString)")
                     }
+                },
+                onSelectionChanged: { [self] _ in
+                    hasTextSelection = nav.currentSelection != nil
                 }
             )
             nav.delegate = delegate
@@ -399,6 +433,7 @@ struct ReaderView: View {
            let startPos = findStartFromSelection(selection) {
             playbackManager.play(fromParagraphIndex: startPos.paragraphIndex, wordIndex: startPos.wordIndex)
             nav.clearSelection()
+            hasTextSelection = false
             return
         }
 
@@ -408,32 +443,28 @@ struct ReaderView: View {
         playbackManager.play(fromParagraphIndex: paragraphIdx, wordIndex: wordIdx)
     }
 
+    private func startTTSFromSelection(_ selection: Selection) {
+        guard !bookStore.apiKey.isEmpty, !bookStore.selectedVoiceId.isEmpty else {
+            playbackManager.error = "Set your API key and voice in Settings first."
+            return
+        }
+
+        guard let startPos = findStartFromSelection(selection) else { return }
+
+        reconfigurePlayback()
+        playbackManager.play(fromParagraphIndex: startPos.paragraphIndex, wordIndex: startPos.wordIndex)
+        navigator?.clearSelection()
+        hasTextSelection = false
+    }
+
     private func findStartFromSelection(_ selection: Selection) -> (paragraphIndex: Int, wordIndex: Int)? {
         guard let parsedBook else { return nil }
-        let selectedText = (selection.locator.text.highlight ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !selectedText.isEmpty else { return nil }
-
-        let hrefString = selection.locator.href.string
-        let selectedWords = selectedText.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        guard let firstSelectedWord = selectedWords.first else { return nil }
-
-        // Try exact match within a paragraph first
-        for (index, paragraph) in parsedBook.flatParagraphs.enumerated() {
-            guard paragraph.resourceHref == hrefString else { continue }
-            if paragraph.text.contains(selectedText),
-               let matchingWord = paragraph.words.first(where: { $0.text == firstSelectedWord }) {
-                return (paragraphIndex: index, wordIndex: matchingWord.id)
-            }
-        }
-
-        // Fallback: match by first selected word (handles cross-paragraph selections)
-        for (index, paragraph) in parsedBook.flatParagraphs.enumerated() {
-            guard paragraph.resourceHref == hrefString else { continue }
-            if let matchingWord = paragraph.words.first(where: { $0.text == firstSelectedWord }) {
-                return (paragraphIndex: index, wordIndex: matchingWord.id)
-            }
-        }
-        return nil
+        let selectedText = selection.locator.text.highlight ?? ""
+        return TTSHighlightHelper.findStartPosition(
+            selectedText: selectedText,
+            hrefString: selection.locator.href.string,
+            paragraphs: parsedBook.flatParagraphs
+        )
     }
 
     private func navigateToChapter(_ chapter: BookChapter) {
@@ -477,19 +508,15 @@ struct ReaderView: View {
         }
 
         let wordPosition = paragraph.words.firstIndex(where: { $0.id == wordIndex }) ?? 0
-        let beforeWords = paragraph.words.prefix(wordPosition).suffix(8)
-        let afterWords = paragraph.words.dropFirst(wordPosition + 1).prefix(8)
-
-        let beforeText = beforeWords.map(\.text).joined(separator: " ")
-        let afterText = afterWords.map(\.text).joined(separator: " ")
+        let ctx = TTSHighlightHelper.buildTextContext(words: paragraph.words, wordPosition: wordPosition)
 
         let locator = Locator(
             href: hrefURL,
             mediaType: .xhtml,
             text: Locator.Text(
-                after: afterText.isEmpty ? nil : afterText,
-                before: beforeText.isEmpty ? nil : beforeText,
-                highlight: word.text
+                after: ctx.after,
+                before: ctx.before,
+                highlight: ctx.highlight
             )
         )
 
@@ -499,68 +526,79 @@ struct ReaderView: View {
             style: .highlight(tint: .systemBlue, isActive: true)
         )
 
+        #if DEBUG
+        print("[TTS-HL] word='\(ctx.highlight)' para=\(paraId) href=\(paragraph.resourceHref) before=\(ctx.before?.count ?? 0)ch after=\(ctx.after?.count ?? 0)ch")
+        #endif
+
         nav.apply(decorations: [decoration], in: "tts")
 
-        // Smart scrolling: only scroll when needed, never snap to top
         let resourceChanged = paragraph.resourceHref != lastScrolledResourceHref
+        let paragraphChanged = paraId != lastScrolledParagraphId
 
         if resourceChanged {
-            // New chapter/resource: must navigate to load the resource
             lastScrolledResourceHref = paragraph.resourceHref
             lastScrolledParagraphId = paraId
-            Task {
+            navigationTask?.cancel()
+            navigationTask = Task {
+                await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            }
+        } else if paragraphChanged {
+            lastScrolledParagraphId = paraId
+            navigationTask?.cancel()
+            navigationTask = Task {
                 await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
             }
         } else {
-            // Same resource: use JS to check if highlight is visible and smooth scroll if needed
-            // Throttle to avoid excessive JS evaluations (max ~3/sec)
             let now = Date()
-            let paragraphChanged = paraId != lastScrolledParagraphId
-            if paragraphChanged {
-                lastScrolledParagraphId = paraId
-            }
-            if paragraphChanged || now.timeIntervalSince(lastScrollCheckTime) >= 0.4 {
+            if now.timeIntervalSince(lastScrollCheckTime) >= 0.5 {
                 lastScrollCheckTime = now
-                scrollHighlightIntoViewIfNeeded(nav: nav, fallbackLocator: locator)
+                if bookStore.isPagedMode {
+                    // In paged mode, JS can't turn pages. Use go(to:) which is
+                    // effectively a no-op when the word is already on the current page.
+                    navigationTask?.cancel()
+                    navigationTask = Task {
+                        await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+                    }
+                } else {
+                    scrollHighlightIntoViewIfNeeded(nav: nav)
+                }
             }
         }
     }
 
-    private func scrollHighlightIntoViewIfNeeded(nav: EPUBNavigatorViewController, fallbackLocator: Locator? = nil) {
+    private func scrollHighlightIntoViewIfNeeded(nav: EPUBNavigatorViewController) {
         Task {
             let js = """
             (function() {
                 var group = document.querySelector('[data-group="tts"]');
-                if (!group) return 'none';
+                if (!group) return 'no-group';
                 var items = group.querySelectorAll('div[data-style]');
                 var el = items.length > 0 ? items[items.length - 1] : null;
                 if (!el) {
                     var allDivs = group.querySelectorAll('div');
                     el = allDivs.length > 0 ? allDivs[allDivs.length - 1] : null;
                 }
-                if (!el) return 'none';
-                var bodyStyle = window.getComputedStyle(document.documentElement);
-                var isPaged = bodyStyle.columnWidth !== 'auto' ||
-                              bodyStyle.getPropertyValue('overflow') === 'hidden';
+                if (!el) return 'no-element|children=' + group.childNodes.length;
                 var rect = el.getBoundingClientRect();
                 var vh = window.innerHeight;
                 var vw = window.innerWidth;
-                if (isPaged) {
-                    if (rect.left >= 0 && rect.right <= vw) return 'visible';
-                    return 'paged';
-                }
                 if (rect.top >= 0 && rect.bottom <= vh * 0.8) return 'visible';
                 var targetY = window.scrollY + rect.top - vh * 0.3;
                 window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
-                return 'scrolled';
+                return 'scrolled|rect=' + Math.round(rect.top) + ',' + Math.round(rect.bottom) + '|vh=' + vh;
             })()
             """
             let result = await nav.evaluateJavaScript(js)
-            if case .success(let value) = result,
-               let str = value as? String, str == "paged",
-               let locator = fallbackLocator {
-                await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            #if DEBUG
+            if case .success(let val) = result {
+                let str = (val as? String) ?? "nil"
+                if str != "visible" {
+                    print("[TTS-SCROLL] \(str)")
+                }
+            } else if case .failure(let err) = result {
+                print("[TTS-SCROLL] error: \(err)")
             }
+            #endif
         }
     }
 
@@ -633,10 +671,16 @@ struct ReaderView: View {
 final class ReaderNavigatorDelegate: NSObject, EPUBNavigatorDelegate {
     private let onTap: () -> Void
     private let onLocationChanged: (Locator) -> Void
+    private let onSelectionChanged: ((Selection) -> Void)?
 
-    init(onTap: @escaping () -> Void, onLocationChanged: @escaping (Locator) -> Void) {
+    init(
+        onTap: @escaping () -> Void,
+        onLocationChanged: @escaping (Locator) -> Void,
+        onSelectionChanged: ((Selection) -> Void)? = nil
+    ) {
         self.onTap = onTap
         self.onLocationChanged = onLocationChanged
+        self.onSelectionChanged = onSelectionChanged
     }
 
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
@@ -645,6 +689,11 @@ final class ReaderNavigatorDelegate: NSObject, EPUBNavigatorDelegate {
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         onLocationChanged(locator)
+    }
+
+    func navigator(_ navigator: SelectableNavigator, shouldShowMenuForSelection selection: Selection) -> Bool {
+        onSelectionChanged?(selection)
+        return true
     }
 
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) {}
