@@ -100,7 +100,19 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Reading") {
+            Section("Appearance") {
+                HStack {
+                    Text("Theme")
+                    Spacer()
+                    Picker("", selection: themeBinding) {
+                        ForEach(ReaderTheme.allCases, id: \.rawValue) { theme in
+                            Text(theme.label).tag(theme)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 220)
+                }
+
                 HStack {
                     Text("Font Size")
                     Spacer()
@@ -138,6 +150,10 @@ struct SettingsView: View {
                 Task { await loadVoices() }
             }
         }
+    }
+
+    private var themeBinding: Binding<ReaderTheme> {
+        Binding(get: { bookStore.readerTheme }, set: { bookStore.readerTheme = $0 })
     }
 
     private var fontSizeBinding: Binding<Double> {

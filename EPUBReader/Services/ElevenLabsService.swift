@@ -56,7 +56,13 @@ final class ElevenLabsService: Sendable {
         return voicesResponse.voices.sorted { $0.name < $1.name }
     }
 
-    func generateSpeech(text: String, voiceId: String, apiKey: String) async throws -> TTSResponse {
+    func generateSpeech(
+        text: String,
+        voiceId: String,
+        apiKey: String,
+        previousText: String? = nil,
+        nextText: String? = nil
+    ) async throws -> TTSResponse {
         var components = URLComponents(string: "\(baseURL)/text-to-speech/\(voiceId)/with-timestamps")!
         components.queryItems = [URLQueryItem(name: "output_format", value: "mp3_44100_128")]
 
@@ -66,7 +72,7 @@ final class ElevenLabsService: Sendable {
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 30
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "text": text,
             "model_id": "eleven_flash_v2_5",
             "voice_settings": [
@@ -76,6 +82,13 @@ final class ElevenLabsService: Sendable {
                 "use_speaker_boost": true
             ]
         ]
+
+        if let previousText, !previousText.isEmpty {
+            body["previous_text"] = previousText
+        }
+        if let nextText, !nextText.isEmpty {
+            body["next_text"] = nextText
+        }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -99,8 +112,13 @@ final class ElevenLabsService: Sendable {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return String(data: data, encoding: .utf8) ?? ""
         }
-        if let detail = json["detail"] as? [String: Any], let message = detail["message"] as? String {
-            return message
+        if let detail = json["detail"] as? [String: Any] {
+            let status = detail["status"] as? String ?? ""
+            let message = detail["message"] as? String ?? ""
+            if status == "quota_exceeded" {
+                return "Monthly character quota exceeded. Upgrade your ElevenLabs plan for more characters."
+            }
+            if !message.isEmpty { return message }
         }
         if let detail = json["detail"] as? String {
             return detail

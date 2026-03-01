@@ -14,13 +14,16 @@ struct ReaderView: View {
     @State private var hideControlsTask: Task<Void, Never>?
     @State private var initialScrollDone = false
     @State private var showChapterList = false
-    @State private var scrollProxy: ScrollViewProxy?
+    @State private var showSettings = false
+    @State private var pendingScrollTarget: Int?
 
-    private let speedOptions: [Double] = [0.5, 0.75, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
+    private let speedOptions: [Double] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.5]
+
+    private var theme: ReaderTheme { bookStore.readerTheme }
 
     var body: some View {
         ZStack {
-            Color(.systemBackground)
+            theme.backgroundColor
                 .ignoresSafeArea()
 
             if let parsedBook {
@@ -38,17 +41,25 @@ struct ReaderView: View {
         .navigationBarHidden(true)
         .statusBarHidden(!showControls)
         .ignoresSafeArea(edges: showControls ? [] : .all)
+        .preferredColorScheme(theme.colorScheme)
         .task { await loadBook() }
         .onDisappear {
             playbackManager.stop()
         }
         .onChange(of: playbackManager.isPlaying) { _, playing in
-            if playing {
-                scheduleHideControls()
-            }
+            if playing { scheduleHideControls() }
         }
         .sheet(isPresented: $showChapterList) {
             chapterListSheet
+        }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                SettingsView()
+                    .environmentObject(bookStore)
+            }
+        }
+        .onChange(of: showSettings) { _, isShowing in
+            if !isShowing { reconfigurePlayback() }
         }
     }
 
@@ -72,17 +83,24 @@ struct ReaderView: View {
             }
             .applyPagedScroll(bookStore.isPagedMode)
             .onChange(of: playbackManager.currentParagraphId) { _, newId in
-                withAnimation(.easeInOut(duration: 0.4)) {
-                    proxy.scrollTo(newId, anchor: .top)
+                // Gentle scroll: position paragraph at ~30% from top, slower animation
+                withAnimation(.easeInOut(duration: 0.7)) {
+                    proxy.scrollTo(newId, anchor: UnitPoint(x: 0.5, y: 0.3))
                 }
             }
+            .onChange(of: pendingScrollTarget) { _, target in
+                guard let target else { return }
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    proxy.scrollTo(target, anchor: .top)
+                }
+                pendingScrollTarget = nil
+            }
             .onAppear {
-                scrollProxy = proxy
                 if !initialScrollDone {
                     initialScrollDone = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         if playbackManager.currentParagraphId > 0 {
-                            proxy.scrollTo(playbackManager.currentParagraphId, anchor: .top)
+                            proxy.scrollTo(playbackManager.currentParagraphId, anchor: UnitPoint(x: 0.5, y: 0.3))
                         }
                     }
                 }
@@ -91,10 +109,20 @@ struct ReaderView: View {
     }
 
     private func paragraphView(_ paragraph: BookParagraph) -> some View {
-        Text(makeAttributedString(paragraph: paragraph))
+        let isActive = (playbackManager.isPlaying || playbackManager.isLoadingAudio)
+            && paragraph.id == playbackManager.currentParagraphId
+
+        let content: Text = if isActive {
+            Text(makeHighlightedString(paragraph: paragraph))
+        } else {
+            Text(paragraph.text)
+        }
+
+        return content
             .font(paragraph.isHeading ?
                   .system(size: bookStore.fontSize + 6, weight: .bold) :
                   .system(size: bookStore.fontSize))
+            .foregroundStyle(theme.textColor)
             .lineSpacing(paragraph.isHeading ? 4 : 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
@@ -114,15 +142,16 @@ struct ReaderView: View {
             }
     }
 
-    private func makeAttributedString(paragraph: BookParagraph) -> AttributedString {
+    private func makeHighlightedString(paragraph: BookParagraph) -> AttributedString {
         var result = AttributedString()
         let highlightIndex = playbackManager.currentGlobalWordIndex
-        let isActive = playbackManager.isPlaying || playbackManager.isLoadingAudio
+        let textColor = theme.textColor
 
         for (i, word) in paragraph.words.enumerated() {
             var wordAttr = AttributedString(word.text)
+            wordAttr.foregroundColor = textColor
 
-            if word.id == highlightIndex && isActive {
+            if word.id == highlightIndex {
                 wordAttr.backgroundColor = Color.accentColor.opacity(0.25)
                 wordAttr.foregroundColor = Color.accentColor
                 wordAttr.font = paragraph.isHeading ?
@@ -133,7 +162,9 @@ struct ReaderView: View {
             result.append(wordAttr)
 
             if i < paragraph.words.count - 1 {
-                result.append(AttributedString(" "))
+                var space = AttributedString(" ")
+                space.foregroundColor = textColor
+                result.append(space)
             }
         }
 
@@ -163,11 +194,19 @@ struct ReaderView: View {
 
                 Spacer()
 
-                Button { showChapterList = true } label: {
-                    Image(systemName: "list.bullet")
-                        .font(.title3)
-                        .foregroundStyle(.primary)
-                        .frame(width: 44, height: 44)
+                HStack(spacing: 4) {
+                    Button { showChapterList = true } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.title3)
+                            .foregroundStyle(.primary)
+                            .frame(width: 40, height: 44)
+                    }
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gear")
+                            .font(.title3)
+                            .foregroundStyle(.primary)
+                            .frame(width: 40, height: 44)
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -175,6 +214,12 @@ struct ReaderView: View {
             .background(.ultraThinMaterial)
 
             Spacer()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showControls = false
+                    }
+                }
 
             // Bottom controls
             VStack(spacing: 12) {
@@ -190,6 +235,58 @@ struct ReaderView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
+
+                // Theme pills
+                HStack(spacing: 8) {
+                    ForEach(ReaderTheme.allCases, id: \.rawValue) { t in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                bookStore.readerTheme = t
+                            }
+                        } label: {
+                            Text(t.label)
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Capsule()
+                                        .fill(theme == t ? Color.accentColor : Color(.systemGray5))
+                                )
+                                .foregroundStyle(theme == t ? .white : .primary)
+                        }
+                    }
+
+                    Spacer()
+
+                    // Font size controls
+                    HStack(spacing: 8) {
+                        Button {
+                            if bookStore.fontSize > 12 { bookStore.fontSize -= 1 }
+                        } label: {
+                            Text("A")
+                                .font(.system(size: 13, weight: .medium))
+                                .frame(width: 30, height: 30)
+                                .background(Circle().fill(Color(.systemGray5)))
+                                .foregroundStyle(.primary)
+                        }
+
+                        Text("\(Int(bookStore.fontSize))")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 22)
+
+                        Button {
+                            if bookStore.fontSize < 32 { bookStore.fontSize += 1 }
+                        } label: {
+                            Text("A")
+                                .font(.system(size: 17, weight: .medium))
+                                .frame(width: 30, height: 30)
+                                .background(Circle().fill(Color(.systemGray5)))
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
 
                 // Speed pills
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -214,61 +311,6 @@ struct ReaderView: View {
                     }
                     .padding(.horizontal, 20)
                 }
-
-                // Mode + Font size row
-                HStack(spacing: 16) {
-                    // Reading mode toggle
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            bookStore.isPagedMode.toggle()
-                        }
-                    } label: {
-                        Label(
-                            bookStore.isPagedMode ? "Paged" : "Scroll",
-                            systemImage: bookStore.isPagedMode ? "rectangle.split.3x1" : "scroll"
-                        )
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color(.systemGray5)))
-                        .foregroundStyle(.primary)
-                    }
-
-                    Spacer()
-
-                    // Font size controls
-                    HStack(spacing: 12) {
-                        Button {
-                            if bookStore.fontSize > 12 {
-                                bookStore.fontSize -= 1
-                            }
-                        } label: {
-                            Text("A")
-                                .font(.system(size: 13, weight: .medium))
-                                .frame(width: 32, height: 32)
-                                .background(Circle().fill(Color(.systemGray5)))
-                                .foregroundStyle(.primary)
-                        }
-
-                        Text("\(Int(bookStore.fontSize))pt")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 36)
-
-                        Button {
-                            if bookStore.fontSize < 32 {
-                                bookStore.fontSize += 1
-                            }
-                        } label: {
-                            Text("A")
-                                .font(.system(size: 18, weight: .medium))
-                                .frame(width: 32, height: 32)
-                                .background(Circle().fill(Color(.systemGray5)))
-                                .foregroundStyle(.primary)
-                        }
-                    }
-                }
-                .padding(.horizontal, 20)
 
                 // Playback controls
                 HStack(spacing: 36) {
@@ -309,19 +351,21 @@ struct ReaderView: View {
                 if let chapters = parsedBook?.chapters {
                     ForEach(chapters, id: \.index) { chapter in
                         Button {
-                            let targetId = chapter.paragraphs.first?.id
+                            if let targetId = chapter.paragraphs.first?.id {
+                                pendingScrollTarget = targetId
+                            }
                             showChapterList = false
-                            if let targetId {
-                                Task { @MainActor in
-                                    try? await Task.sleep(for: .milliseconds(300))
-                                    withAnimation(.easeInOut(duration: 0.4)) {
-                                        scrollProxy?.scrollTo(targetId, anchor: .top)
-                                    }
+                        } label: {
+                            HStack {
+                                Text(chapter.title)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if chapter.index == currentChapterIndex {
+                                    Image(systemName: "speaker.wave.2.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(Color.accentColor)
                                 }
                             }
-                        } label: {
-                            Text(chapter.title)
-                                .foregroundStyle(.primary)
                         }
                     }
                 }
@@ -338,6 +382,12 @@ struct ReaderView: View {
         .presentationDetents([.medium, .large])
     }
 
+    private var currentChapterIndex: Int {
+        guard let parsedBook else { return -1 }
+        let currentParaId = playbackManager.currentParagraphId
+        return parsedBook.flatParagraphs.first(where: { $0.id == currentParaId })?.chapterIndex ?? -1
+    }
+
     // MARK: - Actions
 
     private func loadBook() async {
@@ -348,14 +398,7 @@ struct ReaderView: View {
             playbackManager.setBook(paragraphs: parsed.flatParagraphs)
             currentSpeed = bookStore.playbackSpeed
 
-            playbackManager.configure(
-                apiKey: bookStore.apiKey,
-                voiceId: bookStore.selectedVoiceId,
-                speed: currentSpeed,
-                onPositionUpdate: { position in
-                    bookStore.saveReadingPosition(bookId: book.id, position: position)
-                }
-            )
+            reconfigurePlayback()
 
             if let position = bookStore.getReadingPosition(bookId: book.id) {
                 playbackManager.currentGlobalWordIndex = position.globalWordIndex
@@ -372,6 +415,18 @@ struct ReaderView: View {
         }
     }
 
+    private func reconfigurePlayback() {
+        currentSpeed = bookStore.playbackSpeed
+        playbackManager.configure(
+            apiKey: bookStore.apiKey,
+            voiceId: bookStore.selectedVoiceId,
+            speed: currentSpeed,
+            onPositionUpdate: { position in
+                bookStore.saveReadingPosition(bookId: book.id, position: position)
+            }
+        )
+    }
+
     private func handlePlayPause() {
         if playbackManager.isPlaying {
             playbackManager.pause()
@@ -383,14 +438,7 @@ struct ReaderView: View {
             return
         }
 
-        playbackManager.configure(
-            apiKey: bookStore.apiKey,
-            voiceId: bookStore.selectedVoiceId,
-            speed: currentSpeed,
-            onPositionUpdate: { position in
-                bookStore.saveReadingPosition(bookId: book.id, position: position)
-            }
-        )
+        reconfigurePlayback()
 
         let position = bookStore.getReadingPosition(bookId: book.id)
         let paragraphIdx = position?.paragraphIndex ?? 0
@@ -407,14 +455,7 @@ struct ReaderView: View {
             return
         }
 
-        playbackManager.configure(
-            apiKey: bookStore.apiKey,
-            voiceId: bookStore.selectedVoiceId,
-            speed: currentSpeed,
-            onPositionUpdate: { position in
-                bookStore.saveReadingPosition(bookId: book.id, position: position)
-            }
-        )
+        reconfigurePlayback()
 
         let firstWordId = paragraph.words.first?.id ?? 0
         playbackManager.play(fromParagraphIndex: index, wordIndex: firstWordId)
