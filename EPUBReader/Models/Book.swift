@@ -20,6 +20,13 @@ struct ReadingPosition: Codable {
     var globalWordIndex: Int
 }
 
+struct BookHighlight: Codable, Identifiable, Hashable {
+    let id: UUID
+    let text: String
+    let chapterName: String
+    let dateCreated: Date
+}
+
 struct ParsedBook {
     let metadata: BookMetadata
     let chapters: [BookChapter]

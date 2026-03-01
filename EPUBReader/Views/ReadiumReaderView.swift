@@ -6,15 +6,18 @@ import ReadiumNavigator
 struct ReadiumReaderView: UIViewControllerRepresentable {
     let navigator: EPUBNavigatorViewController
     var onSpeakFromSelection: ((Selection) -> Void)?
+    var onHighlightSelection: ((Selection) -> Void)?
 
     func makeUIViewController(context: Context) -> ReaderContainerViewController {
         let container = ReaderContainerViewController(navigator: navigator)
         container.onSpeakFromSelection = onSpeakFromSelection
+        container.onHighlightSelection = onHighlightSelection
         return container
     }
 
     func updateUIViewController(_ vc: ReaderContainerViewController, context: Context) {
         vc.onSpeakFromSelection = onSpeakFromSelection
+        vc.onHighlightSelection = onHighlightSelection
     }
 }
 
@@ -24,6 +27,7 @@ struct ReadiumReaderView: UIViewControllerRepresentable {
 class ReaderContainerViewController: UIViewController {
     let navigator: EPUBNavigatorViewController
     var onSpeakFromSelection: ((Selection) -> Void)?
+    var onHighlightSelection: ((Selection) -> Void)?
 
     init(navigator: EPUBNavigatorViewController) {
         self.navigator = navigator
@@ -47,8 +51,13 @@ class ReaderContainerViewController: UIViewController {
         onSpeakFromSelection?(selection)
     }
 
+    @objc func highlightSelection(_ sender: Any?) {
+        guard let selection = navigator.currentSelection else { return }
+        onHighlightSelection?(selection)
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(speakFromHere(_:)) {
+        if action == #selector(speakFromHere(_:)) || action == #selector(highlightSelection(_:)) {
             return navigator.currentSelection != nil
         }
         return super.canPerformAction(action, withSender: sender)

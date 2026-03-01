@@ -89,6 +89,7 @@ class BookStore: ObservableObject {
         books.removeAll { $0.id == book.id }
         try? FileManager.default.removeItem(at: book.fileURL)
         defaults.removeObject(forKey: "position_\(book.id.uuidString)")
+        defaults.removeObject(forKey: "highlights_\(book.id.uuidString)")
         saveBooks()
     }
 
@@ -101,6 +102,53 @@ class BookStore: ObservableObject {
     func getReadingPosition(bookId: UUID) -> ReadingPosition? {
         guard let data = defaults.data(forKey: "position_\(bookId.uuidString)") else { return nil }
         return try? JSONDecoder().decode(ReadingPosition.self, from: data)
+    }
+
+    // MARK: - Highlights
+
+    func getHighlights(bookId: UUID) -> [BookHighlight] {
+        guard let data = defaults.data(forKey: "highlights_\(bookId.uuidString)") else { return [] }
+        return (try? JSONDecoder().decode([BookHighlight].self, from: data)) ?? []
+    }
+
+    func addHighlight(_ highlight: BookHighlight, bookId: UUID) {
+        var highlights = getHighlights(bookId: bookId)
+        highlights.append(highlight)
+        saveHighlights(highlights, bookId: bookId)
+    }
+
+    func removeHighlight(id: UUID, bookId: UUID) {
+        var highlights = getHighlights(bookId: bookId)
+        highlights.removeAll { $0.id == id }
+        saveHighlights(highlights, bookId: bookId)
+    }
+
+    func exportHighlightsMarkdown(bookTitle: String, bookId: UUID) -> String {
+        let highlights = getHighlights(bookId: bookId)
+        guard !highlights.isEmpty else { return "No highlights yet." }
+
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+
+        var md = "# Highlights from \"\(bookTitle)\"\n\n"
+        var currentChapter = ""
+        for h in highlights {
+            if h.chapterName != currentChapter {
+                currentChapter = h.chapterName
+                md += "## \(currentChapter)\n\n"
+            }
+            md += "> \(h.text)\n\n"
+            md += "*\(formatter.string(from: h.dateCreated))*\n\n---\n\n"
+        }
+        return md
+    }
+
+    private func saveHighlights(_ highlights: [BookHighlight], bookId: UUID) {
+        objectWillChange.send()
+        if let data = try? JSONEncoder().encode(highlights) {
+            defaults.set(data, forKey: "highlights_\(bookId.uuidString)")
+        }
     }
 
     private func loadBooks() {

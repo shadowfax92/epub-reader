@@ -18,6 +18,7 @@ struct ReaderView: View {
     @State private var hideControlsTask: Task<Void, Never>?
     @State private var showChapterList = false
     @State private var showSettings = false
+    @State private var showHighlights = false
     @State private var navigatorDelegate: ReaderNavigatorDelegate?
     @State private var lastScrolledResourceHref: String?
     @State private var hasTextSelection = false
@@ -33,9 +34,15 @@ struct ReaderView: View {
                 .ignoresSafeArea()
 
             if let navigator {
-                ReadiumReaderView(navigator: navigator, onSpeakFromSelection: { selection in
-                    startTTSFromSelection(selection)
-                })
+                ReadiumReaderView(
+                    navigator: navigator,
+                    onSpeakFromSelection: { selection in
+                        startTTSFromSelection(selection)
+                    },
+                    onHighlightSelection: { selection in
+                        saveHighlight(from: selection)
+                    }
+                )
                     .ignoresSafeArea()
             } else if isLoading {
                 ProgressView("Loading book...")
@@ -75,6 +82,12 @@ struct ReaderView: View {
                     .environmentObject(bookStore)
             }
         }
+        .sheet(isPresented: $showHighlights) {
+            NavigationStack {
+                HighlightsView(book: book)
+                    .environmentObject(bookStore)
+            }
+        }
         .onChange(of: showSettings) { _, isShowing in
             if !isShowing { reconfigurePlayback() }
         }
@@ -103,6 +116,12 @@ struct ReaderView: View {
                 Spacer()
 
                 HStack(spacing: 4) {
+                    Button { showHighlights = true } label: {
+                        Image(systemName: "highlighter")
+                            .font(.title3)
+                            .foregroundStyle(.primary)
+                            .frame(width: 40, height: 44)
+                    }
                     Button { showChapterList = true } label: {
                         Image(systemName: "list.bullet")
                             .font(.title3)
@@ -352,6 +371,10 @@ struct ReaderView: View {
             // Build initial preferences from current theme/font
             let preferences = buildPreferences()
 
+            let highlightAction = EditingAction(
+                title: "Highlight",
+                action: #selector(ReaderContainerViewController.highlightSelection(_:))
+            )
             let speakAction = EditingAction(
                 title: "Speak from Here",
                 action: #selector(ReaderContainerViewController.speakFromHere(_:))
@@ -360,7 +383,7 @@ struct ReaderView: View {
                 publication: pub,
                 initialLocation: savedLocator(),
                 preferences: preferences,
-                editingActions: EditingAction.defaultActions + [speakAction]
+                editingActions: [.copy, highlightAction, speakAction]
             )
 
             let delegate = ReaderNavigatorDelegate(
@@ -576,6 +599,34 @@ struct ReaderView: View {
         navigationTask = Task {
             await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
         }
+    }
+
+    // MARK: - Highlights
+
+    private func saveHighlight(from selection: Selection) {
+        let text = selection.locator.text.highlight ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let chapterName: String = {
+            if let parsedBook {
+                let href = selection.locator.href.string
+                if let chapter = parsedBook.chapters.first(where: { ch in
+                    ch.paragraphs.contains { TTSHighlightHelper.hrefsMatch($0.resourceHref, href) }
+                }) {
+                    return chapter.title
+                }
+            }
+            return "Unknown Chapter"
+        }()
+
+        let highlight = BookHighlight(
+            id: UUID(),
+            text: text,
+            chapterName: chapterName,
+            dateCreated: Date()
+        )
+        bookStore.addHighlight(highlight, bookId: book.id)
+        navigator?.clearSelection()
     }
 
     // MARK: - Navigator Preferences
