@@ -50,15 +50,17 @@ final class ElevenLabsService: Sendable {
         request.timeoutInterval = 15
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        try validateResponse(response)
+        try validateResponse(response, data: data)
 
         let voicesResponse = try JSONDecoder().decode(VoicesResponse.self, from: data)
         return voicesResponse.voices.sorted { $0.name < $1.name }
     }
 
     func generateSpeech(text: String, voiceId: String, apiKey: String) async throws -> TTSResponse {
-        let url = URL(string: "\(baseURL)/text-to-speech/\(voiceId)/with-timestamps")!
-        var request = URLRequest(url: url)
+        var components = URLComponents(string: "\(baseURL)/text-to-speech/\(voiceId)/with-timestamps")!
+        components.queryItems = [URLQueryItem(name: "output_format", value: "mp3_44100_128")]
+
+        var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
         request.addValue(apiKey, forHTTPHeaderField: "xi-api-key")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -67,7 +69,6 @@ final class ElevenLabsService: Sendable {
         let body: [String: Any] = [
             "text": text,
             "model_id": "eleven_flash_v2_5",
-            "output_format": "mp3_44100_128",
             "voice_settings": [
                 "stability": 0.5,
                 "similarity_boost": 0.75,
@@ -79,36 +80,53 @@ final class ElevenLabsService: Sendable {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        try validateResponse(response)
+        try validateResponse(response, data: data)
 
         return try JSONDecoder().decode(TTSResponse.self, from: data)
     }
 
-    private func validateResponse(_ response: URLResponse) throws {
+    private func validateResponse(_ response: URLResponse, data: Data) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ElevenLabsError.invalidResponse
         }
-        switch httpResponse.statusCode {
-        case 200...299: return
-        case 401: throw ElevenLabsError.unauthorized
-        case 429: throw ElevenLabsError.rateLimited
-        default: throw ElevenLabsError.serverError(httpResponse.statusCode)
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let detail = extractErrorDetail(from: data)
+            throw ElevenLabsError.apiError(statusCode: httpResponse.statusCode, detail: detail)
         }
+    }
+
+    private func extractErrorDetail(from data: Data) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return String(data: data, encoding: .utf8) ?? ""
+        }
+        if let detail = json["detail"] as? [String: Any], let message = detail["message"] as? String {
+            return message
+        }
+        if let detail = json["detail"] as? String {
+            return detail
+        }
+        if let message = json["message"] as? String {
+            return message
+        }
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }
 
 enum ElevenLabsError: LocalizedError {
     case invalidResponse
-    case unauthorized
-    case rateLimited
-    case serverError(Int)
+    case apiError(statusCode: Int, detail: String)
 
     var errorDescription: String? {
         switch self {
-        case .invalidResponse: return "Invalid response from ElevenLabs."
-        case .unauthorized: return "Invalid API key. Check your ElevenLabs API key in Settings."
-        case .rateLimited: return "Rate limited. Please wait a moment and try again."
-        case .serverError(let code): return "ElevenLabs error (HTTP \(code))."
+        case .invalidResponse:
+            return "Invalid response from ElevenLabs."
+        case .apiError(let code, let detail):
+            if !detail.isEmpty { return detail }
+            switch code {
+            case 401: return "Authentication failed (HTTP 401)."
+            case 429: return "Rate limited. Please wait and try again."
+            default: return "ElevenLabs error (HTTP \(code))."
+            }
         }
     }
 }
