@@ -15,9 +15,20 @@ targets:
     type: application
     platform: iOS
     sources: [EPUBReader]
+    info:
+      path: EPUBReader/Info.plist
+      properties:
+        UIBackgroundModes: [audio]
+        LSSupportsOpeningDocumentsInPlace: true
+        UISupportsDocumentBrowser: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortraitUpsideDown
     settings:
       base:
-        INFOPLIST_FILE: EPUBReader/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.personal.EPUBReader
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
@@ -26,6 +37,5 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SWIFT_VERSION: "6.0"
-        GENERATE_INFOPLIST_FILE: false
     dependencies:
       - package: EPUBKit
