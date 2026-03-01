@@ -233,18 +233,31 @@ struct ReaderView: View {
                     .padding(.horizontal, 20)
                 }
 
-                if hasTextSelection {
-                    Button {
-                        if let nav = navigator, let sel = nav.currentSelection {
-                            startTTSFromSelection(sel)
+                HStack(spacing: 12) {
+                    if hasTextSelection {
+                        Button {
+                            if let nav = navigator, let sel = nav.currentSelection {
+                                startTTSFromSelection(sel)
+                            }
+                        } label: {
+                            Label("Play from selection", systemImage: "text.line.first.and.arrowtriangle.forward")
+                                .font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(Capsule().fill(Color.accentColor))
+                                .foregroundStyle(.white)
                         }
+                    }
+
+                    Button {
+                        jumpToCurrentPosition()
                     } label: {
-                        Label("Play from selection", systemImage: "text.line.first.and.arrowtriangle.forward")
+                        Label("Jump to position", systemImage: "scope")
                             .font(.subheadline.weight(.medium))
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
-                            .background(Capsule().fill(Color.accentColor))
-                            .foregroundStyle(.white)
+                            .background(Capsule().fill(Color(.systemGray5)))
+                            .foregroundStyle(.primary)
                     }
                 }
 
@@ -496,7 +509,7 @@ struct ReaderView: View {
         let paraId = playbackManager.currentParagraphId
 
         guard let paragraph = parsedBook.flatParagraphs.first(where: { $0.id == paraId }),
-              let word = paragraph.words.first(where: { $0.id == wordIndex }),
+              paragraph.words.contains(where: { $0.id == wordIndex }),
               let hrefURL = AnyURL(string: paragraph.resourceHref) else {
             nav.apply(decorations: [], in: "tts")
             return
@@ -532,8 +545,36 @@ struct ReaderView: View {
             lastScrolledResourceHref = paragraph.resourceHref
             navigationTask?.cancel()
             navigationTask = Task {
-                await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+                _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
             }
+        }
+    }
+
+    private func jumpToCurrentPosition() {
+        guard let nav = navigator, let parsedBook else { return }
+        let paraId = playbackManager.currentParagraphId
+        let wordIndex = playbackManager.currentGlobalWordIndex
+
+        guard let paragraph = parsedBook.flatParagraphs.first(where: { $0.id == paraId }),
+              let hrefURL = AnyURL(string: paragraph.resourceHref) else { return }
+
+        let wordPosition = paragraph.words.firstIndex(where: { $0.id == wordIndex }) ?? 0
+        let ctx = TTSHighlightHelper.buildTextContext(words: paragraph.words, wordPosition: wordPosition)
+
+        let locator = Locator(
+            href: hrefURL,
+            mediaType: .xhtml,
+            text: Locator.Text(
+                after: ctx.after,
+                before: ctx.before,
+                highlight: ctx.highlight
+            )
+        )
+
+        lastScrolledResourceHref = paragraph.resourceHref
+        navigationTask?.cancel()
+        navigationTask = Task {
+            await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
         }
     }
 

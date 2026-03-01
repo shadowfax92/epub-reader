@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 struct SettingsView: View {
     @EnvironmentObject var bookStore: BookStore
@@ -9,6 +10,9 @@ struct SettingsView: View {
     @State private var isLoadingVoices = false
     @State private var voiceError: String?
     @State private var showApiKey = false
+    @State private var previewingVoiceId: String?
+    @State private var previewPlayer: AVPlayer?
+    @State private var previewEndObserver: (any NSObjectProtocol)?
 
     var body: some View {
         Form {
@@ -56,11 +60,11 @@ struct SettingsView: View {
             if !voices.isEmpty {
                 Section("Voice") {
                     ForEach(voices, id: \.voice_id) { voice in
-                        Button {
-                            bookStore.selectedVoiceId = voice.voice_id
-                            bookStore.selectedVoiceName = voice.name
-                        } label: {
-                            HStack {
+                        HStack {
+                            Button {
+                                bookStore.selectedVoiceId = voice.voice_id
+                                bookStore.selectedVoiceName = voice.name
+                            } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(voice.name)
                                         .font(.body)
@@ -71,12 +75,22 @@ struct SettingsView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                 }
-                                Spacer()
-                                if bookStore.selectedVoiceId == voice.voice_id {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(Color.accentColor)
-                                        .fontWeight(.semibold)
+                            }
+                            Spacer()
+                            if let url = voice.preview_url, let audioURL = URL(string: url) {
+                                Button {
+                                    togglePreview(voiceId: voice.voice_id, url: audioURL)
+                                } label: {
+                                    Image(systemName: previewingVoiceId == voice.voice_id ? "stop.circle.fill" : "play.circle")
+                                        .font(.title3)
+                                        .foregroundStyle(previewingVoiceId == voice.voice_id ? .red : .accentColor)
                                 }
+                                .buttonStyle(.plain)
+                            }
+                            if bookStore.selectedVoiceId == voice.voice_id {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.accentColor)
+                                    .fontWeight(.semibold)
                             }
                         }
                     }
@@ -150,6 +164,9 @@ struct SettingsView: View {
                 Task { await loadVoices() }
             }
         }
+        .onDisappear {
+            stopPreview()
+        }
     }
 
     private var themeBinding: Binding<ReaderTheme> {
@@ -175,5 +192,39 @@ struct SettingsView: View {
         }
 
         isLoadingVoices = false
+    }
+
+    private func togglePreview(voiceId: String, url: URL) {
+        if previewingVoiceId == voiceId {
+            stopPreview()
+            return
+        }
+        stopPreview()
+        let player = AVPlayer(url: url)
+        previewPlayer = player
+        previewingVoiceId = voiceId
+
+        previewEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: player.currentItem,
+            queue: .main
+        ) { _ in
+            Task { @MainActor [self] in
+                previewingVoiceId = nil
+                previewPlayer = nil
+                previewEndObserver = nil
+            }
+        }
+        player.play()
+    }
+
+    private func stopPreview() {
+        previewPlayer?.pause()
+        previewPlayer = nil
+        previewingVoiceId = nil
+        if let observer = previewEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            previewEndObserver = nil
+        }
     }
 }
