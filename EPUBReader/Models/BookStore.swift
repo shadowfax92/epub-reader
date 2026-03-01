@@ -3,10 +3,43 @@ import SwiftUI
 class BookStore: ObservableObject {
     @Published var books: [BookMetadata] = []
 
-    @AppStorage("elevenLabsApiKey") var apiKey: String = ""
-    @AppStorage("selectedVoiceId") var selectedVoiceId: String = ""
-    @AppStorage("selectedVoiceName") var selectedVoiceName: String = ""
-    @AppStorage("playbackSpeed") var playbackSpeed: Double = 1.0
+    private let defaults = UserDefaults.standard
+
+    var apiKey: String {
+        get { defaults.string(forKey: "elevenLabsApiKey") ?? "" }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "elevenLabsApiKey") }
+    }
+
+    var selectedVoiceId: String {
+        get { defaults.string(forKey: "selectedVoiceId") ?? "" }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "selectedVoiceId") }
+    }
+
+    var selectedVoiceName: String {
+        get { defaults.string(forKey: "selectedVoiceName") ?? "" }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "selectedVoiceName") }
+    }
+
+    var playbackSpeed: Double {
+        get {
+            let v = defaults.double(forKey: "playbackSpeed")
+            return v > 0 ? v : 1.0
+        }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "playbackSpeed") }
+    }
+
+    var fontSize: Double {
+        get {
+            let v = defaults.double(forKey: "readerFontSize")
+            return v > 0 ? v : 17.0
+        }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "readerFontSize") }
+    }
+
+    var isPagedMode: Bool {
+        get { defaults.bool(forKey: "isPagedMode") }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "isPagedMode") }
+    }
 
     private let booksDirectoryURL: URL
     private let metadataFileURL: URL
@@ -47,18 +80,18 @@ class BookStore: ObservableObject {
     func removeBook(_ book: BookMetadata) {
         books.removeAll { $0.id == book.id }
         try? FileManager.default.removeItem(at: book.fileURL)
-        UserDefaults.standard.removeObject(forKey: "position_\(book.id.uuidString)")
+        defaults.removeObject(forKey: "position_\(book.id.uuidString)")
         saveBooks()
     }
 
     func saveReadingPosition(bookId: UUID, position: ReadingPosition) {
         if let data = try? JSONEncoder().encode(position) {
-            UserDefaults.standard.set(data, forKey: "position_\(bookId.uuidString)")
+            defaults.set(data, forKey: "position_\(bookId.uuidString)")
         }
     }
 
     func getReadingPosition(bookId: UUID) -> ReadingPosition? {
-        guard let data = UserDefaults.standard.data(forKey: "position_\(bookId.uuidString)") else { return nil }
+        guard let data = defaults.data(forKey: "position_\(bookId.uuidString)") else { return nil }
         return try? JSONDecoder().decode(ReadingPosition.self, from: data)
     }
 

@@ -13,6 +13,8 @@ struct ReaderView: View {
     @State private var currentSpeed: Double = 1.0
     @State private var hideControlsTask: Task<Void, Never>?
     @State private var initialScrollDone = false
+    @State private var showChapterList = false
+    @State private var scrollProxy: ScrollViewProxy?
 
     private let speedOptions: [Double] = [0.5, 0.75, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
 
@@ -31,7 +33,6 @@ struct ReaderView: View {
 
             if showControls, parsedBook != nil {
                 controlsOverlay
-                    .allowsHitTesting(true)
             }
         }
         .navigationBarHidden(true)
@@ -46,10 +47,14 @@ struct ReaderView: View {
                 scheduleHideControls()
             }
         }
+        .sheet(isPresented: $showChapterList) {
+            chapterListSheet
+        }
     }
 
     // MARK: - Reading Content
 
+    @ViewBuilder
     private func readingContent(_ book: ParsedBook) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -63,13 +68,16 @@ struct ReaderView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 60)
+                .scrollTargetLayout()
             }
+            .applyPagedScroll(bookStore.isPagedMode)
             .onChange(of: playbackManager.currentParagraphId) { _, newId in
                 withAnimation(.easeInOut(duration: 0.4)) {
                     proxy.scrollTo(newId, anchor: .top)
                 }
             }
             .onAppear {
+                scrollProxy = proxy
                 if !initialScrollDone {
                     initialScrollDone = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -79,23 +87,31 @@ struct ReaderView: View {
                     }
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showControls.toggle()
-                }
-                if showControls && playbackManager.isPlaying {
-                    scheduleHideControls()
-                }
-            }
         }
     }
 
     private func paragraphView(_ paragraph: BookParagraph) -> some View {
         Text(makeAttributedString(paragraph: paragraph))
-            .font(paragraph.isHeading ? .title2.bold() : .body)
+            .font(paragraph.isHeading ?
+                  .system(size: bookStore.fontSize + 6, weight: .bold) :
+                  .system(size: bookStore.fontSize))
             .lineSpacing(paragraph.isHeading ? 4 : 6)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if !showControls {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showControls = true
+                    }
+                    if playbackManager.isPlaying {
+                        scheduleHideControls()
+                    }
+                } else {
+                    handleParagraphTap(paragraph)
+                }
+            }
     }
 
     private func makeAttributedString(paragraph: BookParagraph) -> AttributedString {
@@ -109,7 +125,9 @@ struct ReaderView: View {
             if word.id == highlightIndex && isActive {
                 wordAttr.backgroundColor = Color.accentColor.opacity(0.25)
                 wordAttr.foregroundColor = Color.accentColor
-                wordAttr.font = paragraph.isHeading ? .title2.bold() : .body.bold()
+                wordAttr.font = paragraph.isHeading ?
+                    .system(size: bookStore.fontSize + 6, weight: .bold) :
+                    .system(size: bookStore.fontSize, weight: .semibold)
             }
 
             result.append(wordAttr)
@@ -125,7 +143,8 @@ struct ReaderView: View {
     // MARK: - Controls Overlay
 
     private var controlsOverlay: some View {
-        VStack {
+        VStack(spacing: 0) {
+            // Top bar
             HStack {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
@@ -144,7 +163,12 @@ struct ReaderView: View {
 
                 Spacer()
 
-                Color.clear.frame(width: 44, height: 44)
+                Button { showChapterList = true } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.title3)
+                        .foregroundStyle(.primary)
+                        .frame(width: 44, height: 44)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -152,7 +176,8 @@ struct ReaderView: View {
 
             Spacer()
 
-            VStack(spacing: 16) {
+            // Bottom controls
+            VStack(spacing: 12) {
                 if playbackManager.isLoadingAudio {
                     ProgressView()
                         .tint(Color.accentColor)
@@ -166,6 +191,7 @@ struct ReaderView: View {
                         .padding(.horizontal)
                 }
 
+                // Speed pills
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(speedOptions, id: \.self) { speed in
@@ -189,6 +215,62 @@ struct ReaderView: View {
                     .padding(.horizontal, 20)
                 }
 
+                // Mode + Font size row
+                HStack(spacing: 16) {
+                    // Reading mode toggle
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            bookStore.isPagedMode.toggle()
+                        }
+                    } label: {
+                        Label(
+                            bookStore.isPagedMode ? "Paged" : "Scroll",
+                            systemImage: bookStore.isPagedMode ? "rectangle.split.3x1" : "scroll"
+                        )
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color(.systemGray5)))
+                        .foregroundStyle(.primary)
+                    }
+
+                    Spacer()
+
+                    // Font size controls
+                    HStack(spacing: 12) {
+                        Button {
+                            if bookStore.fontSize > 12 {
+                                bookStore.fontSize -= 1
+                            }
+                        } label: {
+                            Text("A")
+                                .font(.system(size: 13, weight: .medium))
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(Color(.systemGray5)))
+                                .foregroundStyle(.primary)
+                        }
+
+                        Text("\(Int(bookStore.fontSize))pt")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 36)
+
+                        Button {
+                            if bookStore.fontSize < 32 {
+                                bookStore.fontSize += 1
+                            }
+                        } label: {
+                            Text("A")
+                                .font(.system(size: 18, weight: .medium))
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(Color(.systemGray5)))
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+
+                // Playback controls
                 HStack(spacing: 36) {
                     Button { playbackManager.skip(seconds: -10) } label: {
                         Image(systemName: "gobackward.10")
@@ -217,6 +299,41 @@ struct ReaderView: View {
             .background(.ultraThinMaterial)
         }
         .transition(.opacity)
+    }
+
+    // MARK: - Chapter List
+
+    private var chapterListSheet: some View {
+        NavigationStack {
+            List {
+                if let chapters = parsedBook?.chapters {
+                    ForEach(chapters, id: \.index) { chapter in
+                        Button {
+                            showChapterList = false
+                            if let firstParagraph = chapter.paragraphs.first {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    withAnimation(.easeInOut(duration: 0.4)) {
+                                        scrollProxy?.scrollTo(firstParagraph.id, anchor: .top)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Text(chapter.title)
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("Chapters")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showChapterList = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     // MARK: - Actions
@@ -279,6 +396,29 @@ struct ReaderView: View {
         playbackManager.play(fromParagraphIndex: paragraphIdx, wordIndex: wordIdx)
     }
 
+    private func handleParagraphTap(_ paragraph: BookParagraph) {
+        guard let parsedBook else { return }
+        guard let index = parsedBook.flatParagraphs.firstIndex(where: { $0.id == paragraph.id }) else { return }
+
+        if bookStore.apiKey.isEmpty || bookStore.selectedVoiceId.isEmpty {
+            playbackManager.error = "Set your API key and voice in Settings first."
+            return
+        }
+
+        playbackManager.configure(
+            apiKey: bookStore.apiKey,
+            voiceId: bookStore.selectedVoiceId,
+            speed: currentSpeed,
+            onPositionUpdate: { position in
+                bookStore.saveReadingPosition(bookId: book.id, position: position)
+            }
+        )
+
+        let firstWordId = paragraph.words.first?.id ?? 0
+        playbackManager.play(fromParagraphIndex: index, wordIndex: firstWordId)
+        scheduleHideControls()
+    }
+
     private func scheduleHideControls() {
         hideControlsTask?.cancel()
         hideControlsTask = Task {
@@ -312,5 +452,18 @@ struct ReaderView: View {
                 .buttonStyle(.borderedProminent)
         }
         .padding()
+    }
+}
+
+// MARK: - Paged Scroll Modifier
+
+extension View {
+    @ViewBuilder
+    func applyPagedScroll(_ isPaged: Bool) -> some View {
+        if isPaged {
+            self.scrollTargetBehavior(.viewAligned)
+        } else {
+            self
+        }
     }
 }

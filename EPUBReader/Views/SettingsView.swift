@@ -81,13 +81,13 @@ struct SettingsView: View {
                         }
                     }
                 }
-            } else if let selectedName = bookStore.selectedVoiceName.isEmpty ? nil : bookStore.selectedVoiceName {
+            } else if !bookStore.selectedVoiceName.isEmpty {
                 Section("Voice") {
                     HStack {
                         Text("Selected")
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text(selectedName)
+                        Text(bookStore.selectedVoiceName)
                     }
                 }
             }
@@ -97,6 +97,33 @@ struct SettingsView: View {
                     Text(voiceError)
                         .foregroundStyle(.red)
                         .font(.caption)
+                }
+            }
+
+            Section("Reading") {
+                HStack {
+                    Text("Font Size")
+                    Spacer()
+                    Text("\(Int(bookStore.fontSize))pt")
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: Binding(
+                    get: { bookStore.fontSize },
+                    set: { bookStore.fontSize = $0 }
+                ), in: 12...32, step: 1)
+
+                HStack {
+                    Text("Reading Mode")
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { bookStore.isPagedMode },
+                        set: { bookStore.isPagedMode = $0 }
+                    )) {
+                        Text("Scroll").tag(false)
+                        Text("Paged").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
                 }
             }
         }
