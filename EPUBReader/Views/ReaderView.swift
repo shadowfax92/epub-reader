@@ -19,6 +19,9 @@ struct ReaderView: View {
     @State private var showChapterList = false
     @State private var showSettings = false
     @State private var navigatorDelegate: ReaderNavigatorDelegate?
+    @State private var lastScrolledResourceHref: String?
+    @State private var lastScrolledParagraphId: Int = -1
+    @State private var lastScrollCheckTime: Date = .distantPast
 
     private let speedOptions: [Double] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.5]
 
@@ -107,6 +110,16 @@ struct ReaderView: View {
                     Button { showSettings = true } label: {
                         Image(systemName: "gear")
                             .font(.title3)
+                            .foregroundStyle(.primary)
+                            .frame(width: 40, height: 44)
+                    }
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showControls = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.title3.weight(.medium))
                             .foregroundStyle(.primary)
                             .frame(width: 40, height: 44)
                     }
@@ -332,8 +345,14 @@ struct ReaderView: View {
                 playbackManager.currentGlobalWordIndex = position.globalWordIndex
                 let paraIdx = min(position.paragraphIndex, parsed.flatParagraphs.count - 1)
                 if paraIdx >= 0 {
-                    playbackManager.currentParagraphId = parsed.flatParagraphs[paraIdx].id
+                    let para = parsed.flatParagraphs[paraIdx]
+                    playbackManager.currentParagraphId = para.id
+                    lastScrolledResourceHref = para.resourceHref
+                    lastScrolledParagraphId = para.id
                 }
+            } else if let firstPara = parsed.flatParagraphs.first {
+                lastScrolledResourceHref = firstPara.resourceHref
+                lastScrolledParagraphId = firstPara.id
             }
 
             navigator = nav
@@ -374,10 +393,47 @@ struct ReaderView: View {
 
         reconfigurePlayback()
 
+        // Check for text selection to start TTS from that point
+        if let nav = navigator,
+           let selection = nav.currentSelection,
+           let startPos = findStartFromSelection(selection) {
+            playbackManager.play(fromParagraphIndex: startPos.paragraphIndex, wordIndex: startPos.wordIndex)
+            nav.clearSelection()
+            return
+        }
+
         let position = bookStore.getReadingPosition(bookId: book.id)
         let paragraphIdx = position?.paragraphIndex ?? 0
         let wordIdx = position?.globalWordIndex ?? 0
         playbackManager.play(fromParagraphIndex: paragraphIdx, wordIndex: wordIdx)
+    }
+
+    private func findStartFromSelection(_ selection: Selection) -> (paragraphIndex: Int, wordIndex: Int)? {
+        guard let parsedBook else { return nil }
+        let selectedText = (selection.locator.text.highlight ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selectedText.isEmpty else { return nil }
+
+        let hrefString = selection.locator.href.string
+        let selectedWords = selectedText.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        guard let firstSelectedWord = selectedWords.first else { return nil }
+
+        // Try exact match within a paragraph first
+        for (index, paragraph) in parsedBook.flatParagraphs.enumerated() {
+            guard paragraph.resourceHref == hrefString else { continue }
+            if paragraph.text.contains(selectedText),
+               let matchingWord = paragraph.words.first(where: { $0.text == firstSelectedWord }) {
+                return (paragraphIndex: index, wordIndex: matchingWord.id)
+            }
+        }
+
+        // Fallback: match by first selected word (handles cross-paragraph selections)
+        for (index, paragraph) in parsedBook.flatParagraphs.enumerated() {
+            guard paragraph.resourceHref == hrefString else { continue }
+            if let matchingWord = paragraph.words.first(where: { $0.text == firstSelectedWord }) {
+                return (paragraphIndex: index, wordIndex: matchingWord.id)
+            }
+        }
+        return nil
     }
 
     private func navigateToChapter(_ chapter: BookChapter) {
@@ -389,17 +445,20 @@ struct ReaderView: View {
             href: hrefURL,
             mediaType: .xhtml
         )
+
+        lastScrolledResourceHref = firstParagraph.resourceHref
+        lastScrolledParagraphId = firstParagraph.id
+
         Task {
             await nav.go(to: locator)
         }
 
-        // Also start TTS from chapter start
+        // Start TTS from chapter start
         if let parsedBook,
-           let index = parsedBook.flatParagraphs.firstIndex(where: { $0.id == firstParagraph.id }) {
-            if playbackManager.isPlaying {
-                reconfigurePlayback()
-                playbackManager.play(fromParagraphIndex: index, wordIndex: firstParagraph.words.first?.id ?? 0)
-            }
+           let index = parsedBook.flatParagraphs.firstIndex(where: { $0.id == firstParagraph.id }),
+           !bookStore.apiKey.isEmpty, !bookStore.selectedVoiceId.isEmpty {
+            reconfigurePlayback()
+            playbackManager.play(fromParagraphIndex: index, wordIndex: firstParagraph.words.first?.id ?? 0)
         }
     }
 
@@ -442,9 +501,66 @@ struct ReaderView: View {
 
         nav.apply(decorations: [decoration], in: "tts")
 
-        // Navigate the reader to follow TTS
+        // Smart scrolling: only scroll when needed, never snap to top
+        let resourceChanged = paragraph.resourceHref != lastScrolledResourceHref
+
+        if resourceChanged {
+            // New chapter/resource: must navigate to load the resource
+            lastScrolledResourceHref = paragraph.resourceHref
+            lastScrolledParagraphId = paraId
+            Task {
+                await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            }
+        } else {
+            // Same resource: use JS to check if highlight is visible and smooth scroll if needed
+            // Throttle to avoid excessive JS evaluations (max ~3/sec)
+            let now = Date()
+            let paragraphChanged = paraId != lastScrolledParagraphId
+            if paragraphChanged {
+                lastScrolledParagraphId = paraId
+            }
+            if paragraphChanged || now.timeIntervalSince(lastScrollCheckTime) >= 0.4 {
+                lastScrollCheckTime = now
+                scrollHighlightIntoViewIfNeeded(nav: nav, fallbackLocator: locator)
+            }
+        }
+    }
+
+    private func scrollHighlightIntoViewIfNeeded(nav: EPUBNavigatorViewController, fallbackLocator: Locator? = nil) {
         Task {
-            await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            let js = """
+            (function() {
+                var group = document.querySelector('[data-group="tts"]');
+                if (!group) return 'none';
+                var items = group.querySelectorAll('div[data-style]');
+                var el = items.length > 0 ? items[items.length - 1] : null;
+                if (!el) {
+                    var allDivs = group.querySelectorAll('div');
+                    el = allDivs.length > 0 ? allDivs[allDivs.length - 1] : null;
+                }
+                if (!el) return 'none';
+                var bodyStyle = window.getComputedStyle(document.documentElement);
+                var isPaged = bodyStyle.columnWidth !== 'auto' ||
+                              bodyStyle.getPropertyValue('overflow') === 'hidden';
+                var rect = el.getBoundingClientRect();
+                var vh = window.innerHeight;
+                var vw = window.innerWidth;
+                if (isPaged) {
+                    if (rect.left >= 0 && rect.right <= vw) return 'visible';
+                    return 'paged';
+                }
+                if (rect.top >= 0 && rect.bottom <= vh * 0.8) return 'visible';
+                var targetY = window.scrollY + rect.top - vh * 0.3;
+                window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
+                return 'scrolled';
+            })()
+            """
+            let result = await nav.evaluateJavaScript(js)
+            if case .success(let value) = result,
+               let str = value as? String, str == "paged",
+               let locator = fallbackLocator {
+                await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            }
         }
     }
 
