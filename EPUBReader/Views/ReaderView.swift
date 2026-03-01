@@ -91,6 +91,9 @@ struct ReaderView: View {
         .onChange(of: showSettings) { _, isShowing in
             if !isShowing { reconfigurePlayback() }
         }
+        .onChange(of: showHighlights) { _, isShowing in
+            if !isShowing { applyHighlightDecorations() }
+        }
     }
 
     // MARK: - Controls Overlay
@@ -423,6 +426,7 @@ struct ReaderView: View {
 
             navigator = nav
             isLoading = false
+            applyHighlightDecorations()
         } catch {
             loadError = error.localizedDescription
             isLoading = false
@@ -623,10 +627,37 @@ struct ReaderView: View {
             id: UUID(),
             text: text,
             chapterName: chapterName,
-            dateCreated: Date()
+            dateCreated: Date(),
+            resourceHref: selection.locator.href.string,
+            textBefore: selection.locator.text.before,
+            textAfter: selection.locator.text.after
         )
         bookStore.addHighlight(highlight, bookId: book.id)
         navigator?.clearSelection()
+        applyHighlightDecorations()
+    }
+
+    private func applyHighlightDecorations() {
+        guard let nav = navigator else { return }
+        let highlights = bookStore.getHighlights(bookId: book.id)
+        let decorations: [Decoration] = highlights.compactMap { h in
+            guard let href = h.resourceHref, let hrefURL = AnyURL(string: href) else { return nil }
+            let locator = Locator(
+                href: hrefURL,
+                mediaType: .xhtml,
+                text: Locator.Text(
+                    after: h.textAfter,
+                    before: h.textBefore,
+                    highlight: h.text
+                )
+            )
+            return Decoration(
+                id: "hl-\(h.id.uuidString)",
+                locator: locator,
+                style: .highlight(tint: .yellow, isActive: false)
+            )
+        }
+        nav.apply(decorations: decorations, in: "user-highlights")
     }
 
     // MARK: - Navigator Preferences

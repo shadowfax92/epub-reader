@@ -25,6 +25,9 @@ struct BookHighlight: Codable, Identifiable, Hashable {
     let text: String
     let chapterName: String
     let dateCreated: Date
+    var resourceHref: String?
+    var textBefore: String?
+    var textAfter: String?
 }
 
 struct ParsedBook {
