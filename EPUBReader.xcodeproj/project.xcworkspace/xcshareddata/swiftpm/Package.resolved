@@ -1,0 +1,33 @@
+{
+  "originHash" : "fd9309abd5ccfa2628788988d22177239612649721be61eabe6906521f81d716",
+  "pins" : [
+    {
+      "identity" : "aexml",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tadija/AEXML",
+      "state" : {
+        "revision" : "db806756c989760b35108146381535aec231092b",
+        "version" : "4.7.0"
+      }
+    },
+    {
+      "identity" : "epubkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/witekbobrowski/EPUBKit.git",
+      "state" : {
+        "revision" : "0dec82ec767c7b4bfee3fe36677b67013ba19ab5",
+        "version" : "0.5.0"
+      }
+    },
+    {
+      "identity" : "zip",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/marmelroy/Zip",
+      "state" : {
+        "revision" : "67fa55813b9e7b3b9acee9c0ae501def28746d76",
+        "version" : "2.1.2"
+      }
+    }
+  ],
+  "version" : 3
+}
