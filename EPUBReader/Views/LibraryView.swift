@@ -107,13 +107,15 @@ struct LibraryView: View {
         case .success(let urls):
             guard let url = urls.first else { return }
             let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-            do {
-                let _ = try bookStore.importBook(from: url)
-            } catch {
-                importError = error.localizedDescription
-                showError = true
+            Task {
+                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let _ = try await bookStore.importBook(from: url)
+                } catch {
+                    importError = error.localizedDescription
+                    showError = true
+                }
             }
 
         case .failure(let error):

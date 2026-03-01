@@ -1,4 +1,5 @@
 import SwiftUI
+import ReadiumShared
 
 @MainActor
 class BookStore: ObservableObject {
@@ -59,7 +60,7 @@ class BookStore: ObservableObject {
         loadBooks()
     }
 
-    func importBook(from sourceURL: URL) throws -> BookMetadata {
+    func importBook(from sourceURL: URL) async throws -> BookMetadata {
         let fileName = sourceURL.lastPathComponent
         let destURL = booksDirectoryURL.appendingPathComponent(fileName)
 
@@ -68,7 +69,8 @@ class BookStore: ObservableObject {
         }
         try FileManager.default.copyItem(at: sourceURL, to: destURL)
 
-        let parsed = try EPUBParserService.shared.parseMetadata(from: destURL)
+        let publication = try await ReadiumService.shared.openPublication(at: destURL)
+        let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
 
         let book = BookMetadata(
             id: UUID(),

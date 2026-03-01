@@ -1,51 +1,40 @@
 import Foundation
-import EPUBKit
+import ReadiumShared
 
 struct EPUBMetadataResult {
     let title: String?
     let author: String?
 }
 
-final class EPUBParserService: Sendable {
+@MainActor
+final class EPUBParserService {
     static let shared = EPUBParserService()
 
-    func parseMetadata(from url: URL) throws -> EPUBMetadataResult {
-        guard let document = EPUBDocument(url: url) else {
-            throw EPUBError.invalidFile
-        }
-        return EPUBMetadataResult(
-            title: document.title,
-            author: document.author
+    func parseMetadata(from url: URL, publication: Publication) -> EPUBMetadataResult {
+        EPUBMetadataResult(
+            title: publication.metadata.title,
+            author: publication.metadata.authors.first?.name
         )
     }
 
-    func parseBook(from metadata: BookMetadata) throws -> ParsedBook {
-        guard let document = EPUBDocument(url: metadata.fileURL) else {
-            throw EPUBError.invalidFile
-        }
-
+    func parseBook(from metadata: BookMetadata, publication: Publication) async throws -> ParsedBook {
         var chapters: [BookChapter] = []
         var flatParagraphs: [BookParagraph] = []
         var globalWordIndex = 0
         var globalParagraphIndex = 0
         var chapterIndex = 0
 
-        let tocTitles = extractTOCTitles(document: document)
+        let tocTitles = await extractTOCTitles(publication: publication)
 
-        for spineItem in document.spine.items {
-            guard let manifestItem = document.manifest.items[spineItem.idref] else { continue }
-            let contentDir = document.contentDirectory
+        for link in publication.readingOrder {
+            guard let resource = publication.get(link) else { continue }
 
-            let chapterURL = contentDir.appendingPathComponent(manifestItem.path)
-            guard FileManager.default.fileExists(atPath: chapterURL.path) else { continue }
+            nonisolated(unsafe) let unsafeResource = resource
+            let htmlResult = await unsafeResource.readAsString()
+            guard case .success(let html) = htmlResult else { continue }
 
-            let mediaType = manifestItem.mediaType
-            guard mediaType == .xHTML else { continue }
-
-            guard let htmlData = try? Data(contentsOf: chapterURL),
-                  let html = String(data: htmlData, encoding: .utf8) else { continue }
-
-            let chapterTitle = tocTitles[manifestItem.path] ?? tocTitles[spineItem.idref] ?? "Chapter \(chapterIndex + 1)"
+            let href = link.href
+            let chapterTitle = tocTitles[href] ?? link.title ?? "Chapter \(chapterIndex + 1)"
             let textBlocks = extractTextBlocks(from: html)
 
             guard !textBlocks.isEmpty else { continue }
@@ -75,7 +64,8 @@ final class EPUBParserService: Sendable {
                     text: wordTexts.joined(separator: " "),
                     words: words,
                     chapterIndex: chapterIndex,
-                    isHeading: block.isHeading
+                    isHeading: block.isHeading,
+                    resourceHref: href
                 )
 
                 chapterParagraphs.append(paragraph)
@@ -101,22 +91,23 @@ final class EPUBParserService: Sendable {
         )
     }
 
-    private func extractTOCTitles(document: EPUBDocument) -> [String: String] {
+    private func extractTOCTitles(publication: Publication) async -> [String: String] {
+        nonisolated(unsafe) let unsafePublication = publication
         var titles: [String: String] = [:]
-        let toc = document.tableOfContents
-        collectTOCTitles(from: toc, into: &titles)
+        if case .success(let tocLinks) = await unsafePublication.tableOfContents() {
+            collectTOCTitles(from: tocLinks, into: &titles)
+        }
         return titles
     }
 
-    private func collectTOCTitles(from toc: EPUBTableOfContents, into titles: inout [String: String]) {
-        if let src = toc.item {
-            let cleanSrc = src.components(separatedBy: "#").first ?? src
-            titles[cleanSrc] = toc.label
-        }
-        if let subItems = toc.subTable {
-            for item in subItems {
-                collectTOCTitles(from: item, into: &titles)
+    private func collectTOCTitles(from links: [Link], into titles: inout [String: String]) {
+        for link in links {
+            let cleanHref = link.href.components(separatedBy: "#").first ?? link.href
+            if let title = link.title {
+                titles[cleanHref] = title
+                titles[link.href] = title
             }
+            collectTOCTitles(from: link.children, into: &titles)
         }
     }
 
@@ -157,9 +148,7 @@ private class HTMLTextExtractor: NSObject, XMLParserDelegate {
         insideBody = false
         depth = 0
 
-        // Clean up common XHTML issues for XMLParser
         var cleanHTML = html
-        // Ensure it's valid XML by wrapping if needed
         if !cleanHTML.contains("<?xml") {
             cleanHTML = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + cleanHTML
         }
@@ -174,7 +163,6 @@ private class HTMLTextExtractor: NSObject, XMLParserDelegate {
 
         flushCurrentBlock()
 
-        // Fallback: if XMLParser failed, use regex stripping
         if blocks.isEmpty {
             let stripped = stripHTMLWithRegex(html)
             if !stripped.isEmpty {
@@ -240,17 +228,13 @@ private class HTMLTextExtractor: NSObject, XMLParserDelegate {
 
     private func stripHTMLWithRegex(_ html: String) -> String {
         var result = html
-        // Remove script/style blocks
         result = result.replacingOccurrences(of: "<script[^>]*>[\\s\\S]*?</script>", with: "", options: .regularExpression)
         result = result.replacingOccurrences(of: "<style[^>]*>[\\s\\S]*?</style>", with: "", options: .regularExpression)
-        // Replace block elements with newlines
         result = result.replacingOccurrences(of: "<br[^>]*>", with: "\n", options: .regularExpression)
         result = result.replacingOccurrences(of: "</p>", with: "\n", options: .caseInsensitive)
         result = result.replacingOccurrences(of: "</div>", with: "\n", options: .caseInsensitive)
         result = result.replacingOccurrences(of: "</h[1-6]>", with: "\n", options: .regularExpression)
-        // Strip all remaining tags
         result = result.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        // Decode common entities
         result = result.replacingOccurrences(of: "&amp;", with: "&")
         result = result.replacingOccurrences(of: "&lt;", with: "<")
         result = result.replacingOccurrences(of: "&gt;", with: ">")
@@ -258,7 +242,6 @@ private class HTMLTextExtractor: NSObject, XMLParserDelegate {
         result = result.replacingOccurrences(of: "&apos;", with: "'")
         result = result.replacingOccurrences(of: "&#39;", with: "'")
         result = result.replacingOccurrences(of: "&nbsp;", with: " ")
-        // Collapse whitespace
         result = result.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
         result = result.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
         return result.trimmingCharacters(in: .whitespacesAndNewlines)

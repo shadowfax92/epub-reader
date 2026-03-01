@@ -39,6 +39,7 @@ struct BookParagraph: Identifiable {
     let words: [BookWord]
     let chapterIndex: Int
     let isHeading: Bool
+    let resourceHref: String
 }
 
 struct BookWord: Identifiable {

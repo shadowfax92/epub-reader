@@ -1,4 +1,6 @@
 import SwiftUI
+import ReadiumShared
+import ReadiumNavigator
 
 struct ReaderView: View {
     let book: BookMetadata
@@ -7,15 +9,16 @@ struct ReaderView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var parsedBook: ParsedBook?
+    @State private var publication: Publication?
+    @State private var navigator: EPUBNavigatorViewController?
     @State private var showControls = true
     @State private var isLoading = true
     @State private var loadError: String?
     @State private var currentSpeed: Double = 1.0
     @State private var hideControlsTask: Task<Void, Never>?
-    @State private var initialScrollDone = false
     @State private var showChapterList = false
     @State private var showSettings = false
-    @State private var pendingScrollTarget: Int?
+    @State private var navigatorDelegate: ReaderNavigatorDelegate?
 
     private let speedOptions: [Double] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.5]
 
@@ -26,21 +29,21 @@ struct ReaderView: View {
             theme.backgroundColor
                 .ignoresSafeArea()
 
-            if let parsedBook {
-                readingContent(parsedBook)
+            if let navigator {
+                ReadiumReaderView(navigator: navigator)
+                    .ignoresSafeArea()
             } else if isLoading {
                 ProgressView("Loading book...")
             } else if let loadError {
                 errorView(loadError)
             }
 
-            if showControls, parsedBook != nil {
+            if showControls, navigator != nil {
                 controlsOverlay
             }
         }
         .navigationBarHidden(true)
         .statusBarHidden(!showControls)
-        .ignoresSafeArea(edges: showControls ? [] : .all)
         .preferredColorScheme(theme.colorScheme)
         .task { await loadBook() }
         .onDisappear {
@@ -48,6 +51,15 @@ struct ReaderView: View {
         }
         .onChange(of: playbackManager.isPlaying) { _, playing in
             if playing { scheduleHideControls() }
+        }
+        .onChange(of: playbackManager.currentGlobalWordIndex) { _, _ in
+            updateWordHighlight()
+        }
+        .onChange(of: bookStore.readerTheme) { _, newTheme in
+            applyThemeToNavigator(newTheme)
+        }
+        .onChange(of: bookStore.fontSize) { _, newSize in
+            applyFontSizeToNavigator(newSize)
         }
         .sheet(isPresented: $showChapterList) {
             chapterListSheet
@@ -63,119 +75,10 @@ struct ReaderView: View {
         }
     }
 
-    // MARK: - Reading Content
-
-    @ViewBuilder
-    private func readingContent(_ book: ParsedBook) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(book.flatParagraphs) { paragraph in
-                        paragraphView(paragraph)
-                            .id(paragraph.id)
-                    }
-
-                    Spacer().frame(height: 140)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 60)
-                .scrollTargetLayout()
-            }
-            .applyPagedScroll(bookStore.isPagedMode)
-            .onChange(of: playbackManager.currentParagraphId) { _, newId in
-                // Gentle scroll: position paragraph at ~30% from top, slower animation
-                withAnimation(.easeInOut(duration: 0.7)) {
-                    proxy.scrollTo(newId, anchor: UnitPoint(x: 0.5, y: 0.3))
-                }
-            }
-            .onChange(of: pendingScrollTarget) { _, target in
-                guard let target else { return }
-                withAnimation(.easeInOut(duration: 0.5)) {
-                    proxy.scrollTo(target, anchor: .top)
-                }
-                pendingScrollTarget = nil
-            }
-            .onAppear {
-                if !initialScrollDone {
-                    initialScrollDone = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        if playbackManager.currentParagraphId > 0 {
-                            proxy.scrollTo(playbackManager.currentParagraphId, anchor: UnitPoint(x: 0.5, y: 0.3))
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func paragraphView(_ paragraph: BookParagraph) -> some View {
-        let isActive = (playbackManager.isPlaying || playbackManager.isLoadingAudio)
-            && paragraph.id == playbackManager.currentParagraphId
-
-        let content: Text = if isActive {
-            Text(makeHighlightedString(paragraph: paragraph))
-        } else {
-            Text(paragraph.text)
-        }
-
-        return content
-            .font(paragraph.isHeading ?
-                  .system(size: bookStore.fontSize + 6, weight: .bold) :
-                  .system(size: bookStore.fontSize))
-            .foregroundStyle(theme.textColor)
-            .lineSpacing(paragraph.isHeading ? 4 : 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if !showControls {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showControls = true
-                    }
-                    if playbackManager.isPlaying {
-                        scheduleHideControls()
-                    }
-                } else {
-                    handleParagraphTap(paragraph)
-                }
-            }
-    }
-
-    private func makeHighlightedString(paragraph: BookParagraph) -> AttributedString {
-        var result = AttributedString()
-        let highlightIndex = playbackManager.currentGlobalWordIndex
-        let textColor = theme.textColor
-
-        for (i, word) in paragraph.words.enumerated() {
-            var wordAttr = AttributedString(word.text)
-            wordAttr.foregroundColor = textColor
-
-            if word.id == highlightIndex {
-                wordAttr.backgroundColor = Color.accentColor.opacity(0.25)
-                wordAttr.foregroundColor = Color.accentColor
-                wordAttr.font = paragraph.isHeading ?
-                    .system(size: bookStore.fontSize + 6, weight: .bold) :
-                    .system(size: bookStore.fontSize, weight: .semibold)
-            }
-
-            result.append(wordAttr)
-
-            if i < paragraph.words.count - 1 {
-                var space = AttributedString(" ")
-                space.foregroundColor = textColor
-                result.append(space)
-            }
-        }
-
-        return result
-    }
-
     // MARK: - Controls Overlay
 
     private var controlsOverlay: some View {
         VStack(spacing: 0) {
-            // Top bar
             HStack {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
@@ -221,7 +124,6 @@ struct ReaderView: View {
                     }
                 }
 
-            // Bottom controls
             VStack(spacing: 12) {
                 if playbackManager.isLoadingAudio {
                     ProgressView()
@@ -258,7 +160,6 @@ struct ReaderView: View {
 
                     Spacer()
 
-                    // Font size controls
                     HStack(spacing: 8) {
                         Button {
                             if bookStore.fontSize > 12 { bookStore.fontSize -= 1 }
@@ -351,9 +252,7 @@ struct ReaderView: View {
                 if let chapters = parsedBook?.chapters {
                     ForEach(chapters, id: \.index) { chapter in
                         Button {
-                            if let targetId = chapter.paragraphs.first?.id {
-                                pendingScrollTarget = targetId
-                            }
+                            navigateToChapter(chapter)
                             showChapterList = false
                         } label: {
                             HStack {
@@ -392,13 +291,42 @@ struct ReaderView: View {
 
     private func loadBook() async {
         do {
-            let parsed = try EPUBParserService.shared.parseBook(from: book)
+            let pub = try await ReadiumService.shared.openPublication(at: book.fileURL)
+            publication = pub
+
+            let parsed = try await EPUBParserService.shared.parseBook(from: book, publication: pub)
             parsedBook = parsed
 
             playbackManager.setBook(paragraphs: parsed.flatParagraphs)
             currentSpeed = bookStore.playbackSpeed
-
             reconfigurePlayback()
+
+            // Build initial preferences from current theme/font
+            let preferences = buildPreferences()
+
+            let nav = try ReadiumService.shared.makeNavigator(
+                publication: pub,
+                initialLocation: savedLocator(),
+                preferences: preferences
+            )
+
+            let delegate = ReaderNavigatorDelegate(
+                onTap: { [self] in
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showControls.toggle()
+                    }
+                    if playbackManager.isPlaying && showControls {
+                        scheduleHideControls()
+                    }
+                },
+                onLocationChanged: { locator in
+                    if let jsonString = locator.jsonString {
+                        UserDefaults.standard.set(jsonString, forKey: "locator_\(book.id.uuidString)")
+                    }
+                }
+            )
+            nav.delegate = delegate
+            navigatorDelegate = delegate
 
             if let position = bookStore.getReadingPosition(bookId: book.id) {
                 playbackManager.currentGlobalWordIndex = position.globalWordIndex
@@ -408,11 +336,17 @@ struct ReaderView: View {
                 }
             }
 
+            navigator = nav
             isLoading = false
         } catch {
             loadError = error.localizedDescription
             isLoading = false
         }
+    }
+
+    private func savedLocator() -> Locator? {
+        guard let jsonString = UserDefaults.standard.string(forKey: "locator_\(book.id.uuidString)") else { return nil }
+        return try? Locator(jsonString: jsonString)
     }
 
     private func reconfigurePlayback() {
@@ -446,20 +380,99 @@ struct ReaderView: View {
         playbackManager.play(fromParagraphIndex: paragraphIdx, wordIndex: wordIdx)
     }
 
-    private func handleParagraphTap(_ paragraph: BookParagraph) {
-        guard let parsedBook else { return }
-        guard let index = parsedBook.flatParagraphs.firstIndex(where: { $0.id == paragraph.id }) else { return }
+    private func navigateToChapter(_ chapter: BookChapter) {
+        guard let nav = navigator,
+              let firstParagraph = chapter.paragraphs.first,
+              let hrefURL = AnyURL(string: firstParagraph.resourceHref) else { return }
 
-        if bookStore.apiKey.isEmpty || bookStore.selectedVoiceId.isEmpty {
-            playbackManager.error = "Set your API key and voice in Settings first."
+        let locator = Locator(
+            href: hrefURL,
+            mediaType: .xhtml
+        )
+        Task {
+            await nav.go(to: locator)
+        }
+
+        // Also start TTS from chapter start
+        if let parsedBook,
+           let index = parsedBook.flatParagraphs.firstIndex(where: { $0.id == firstParagraph.id }) {
+            if playbackManager.isPlaying {
+                reconfigurePlayback()
+                playbackManager.play(fromParagraphIndex: index, wordIndex: firstParagraph.words.first?.id ?? 0)
+            }
+        }
+    }
+
+    // MARK: - Decoration Highlighting
+
+    private func updateWordHighlight() {
+        guard let nav = navigator, let parsedBook else { return }
+        let wordIndex = playbackManager.currentGlobalWordIndex
+        let paraId = playbackManager.currentParagraphId
+
+        guard let paragraph = parsedBook.flatParagraphs.first(where: { $0.id == paraId }),
+              let word = paragraph.words.first(where: { $0.id == wordIndex }),
+              let hrefURL = AnyURL(string: paragraph.resourceHref) else {
+            nav.apply(decorations: [], in: "tts")
             return
         }
 
-        reconfigurePlayback()
+        let wordPosition = paragraph.words.firstIndex(where: { $0.id == wordIndex }) ?? 0
+        let beforeWords = paragraph.words.prefix(wordPosition).suffix(8)
+        let afterWords = paragraph.words.dropFirst(wordPosition + 1).prefix(8)
 
-        let firstWordId = paragraph.words.first?.id ?? 0
-        playbackManager.play(fromParagraphIndex: index, wordIndex: firstWordId)
-        scheduleHideControls()
+        let beforeText = beforeWords.map(\.text).joined(separator: " ")
+        let afterText = afterWords.map(\.text).joined(separator: " ")
+
+        let locator = Locator(
+            href: hrefURL,
+            mediaType: .xhtml,
+            text: Locator.Text(
+                after: afterText.isEmpty ? nil : afterText,
+                before: beforeText.isEmpty ? nil : beforeText,
+                highlight: word.text
+            )
+        )
+
+        let decoration = Decoration(
+            id: "tts-word",
+            locator: locator,
+            style: .highlight(tint: .systemBlue, isActive: true)
+        )
+
+        nav.apply(decorations: [decoration], in: "tts")
+
+        // Navigate the reader to follow TTS
+        Task {
+            await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+        }
+    }
+
+    // MARK: - Navigator Preferences
+
+    private func buildPreferences() -> EPUBPreferences {
+        let readiumTheme: Theme? = switch bookStore.readerTheme {
+        case .light: .light
+        case .dark: .dark
+        case .sepia: .sepia
+        case .system: nil
+        }
+
+        return EPUBPreferences(
+            fontSize: bookStore.fontSize / 17.0, // Readium uses a scale factor
+            scroll: bookStore.isPagedMode ? false : true,
+            theme: readiumTheme
+        )
+    }
+
+    private func applyThemeToNavigator(_ newTheme: ReaderTheme) {
+        guard let nav = navigator else { return }
+        nav.submitPreferences(buildPreferences())
+    }
+
+    private func applyFontSizeToNavigator(_ newSize: Double) {
+        guard let nav = navigator else { return }
+        nav.submitPreferences(buildPreferences())
     }
 
     private func scheduleHideControls() {
@@ -498,15 +511,26 @@ struct ReaderView: View {
     }
 }
 
-// MARK: - Paged Scroll Modifier
+// MARK: - Navigator Delegate
 
-extension View {
-    @ViewBuilder
-    func applyPagedScroll(_ isPaged: Bool) -> some View {
-        if isPaged {
-            self.scrollTargetBehavior(.viewAligned)
-        } else {
-            self
-        }
+@MainActor
+final class ReaderNavigatorDelegate: NSObject, EPUBNavigatorDelegate {
+    private let onTap: () -> Void
+    private let onLocationChanged: (Locator) -> Void
+
+    init(onTap: @escaping () -> Void, onLocationChanged: @escaping (Locator) -> Void) {
+        self.onTap = onTap
+        self.onLocationChanged = onLocationChanged
     }
+
+    func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
+        onTap()
+    }
+
+    func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        onLocationChanged(locator)
+    }
+
+    func navigator(_ navigator: Navigator, presentError error: NavigatorError) {}
+    func navigator(_ navigator: Navigator, presentExternalURL url: URL) {}
 }

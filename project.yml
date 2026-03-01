@@ -6,9 +6,9 @@ options:
   xcodeVersion: "16.0"
 
 packages:
-  EPUBKit:
-    url: https://github.com/witekbobrowski/EPUBKit.git
-    from: "0.5.0"
+  swift-toolkit:
+    url: https://github.com/readium/swift-toolkit.git
+    from: "3.7.0"
 
 targets:
   EPUBReader:
@@ -38,4 +38,11 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SWIFT_VERSION: "6.0"
     dependencies:
-      - package: EPUBKit
+      - package: swift-toolkit
+        product: ReadiumShared
+      - package: swift-toolkit
+        product: ReadiumStreamer
+      - package: swift-toolkit
+        product: ReadiumNavigator
+      - package: swift-toolkit
+        product: ReadiumAdapterGCDWebServer
