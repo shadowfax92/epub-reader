@@ -20,8 +20,6 @@ struct ReaderView: View {
     @State private var showSettings = false
     @State private var navigatorDelegate: ReaderNavigatorDelegate?
     @State private var lastScrolledResourceHref: String?
-    @State private var lastScrolledParagraphId: Int = -1
-    @State private var lastScrollCheckTime: Date = .distantPast
     @State private var hasTextSelection = false
     @State private var navigationTask: Task<Void, Never>?
 
@@ -382,11 +380,9 @@ struct ReaderView: View {
                     let para = parsed.flatParagraphs[paraIdx]
                     playbackManager.currentParagraphId = para.id
                     lastScrolledResourceHref = para.resourceHref
-                    lastScrolledParagraphId = para.id
                 }
             } else if let firstPara = parsed.flatParagraphs.first {
                 lastScrolledResourceHref = firstPara.resourceHref
-                lastScrolledParagraphId = firstPara.id
             }
 
             navigator = nav
@@ -478,7 +474,6 @@ struct ReaderView: View {
         )
 
         lastScrolledResourceHref = firstParagraph.resourceHref
-        lastScrolledParagraphId = firstParagraph.id
 
         Task {
             await nav.go(to: locator)
@@ -532,73 +527,13 @@ struct ReaderView: View {
 
         nav.apply(decorations: [decoration], in: "tts")
 
-        let resourceChanged = paragraph.resourceHref != lastScrolledResourceHref
-        let paragraphChanged = paraId != lastScrolledParagraphId
-
-        if resourceChanged {
+        // Only navigate when the resource (chapter) changes — no auto-scrolling
+        if paragraph.resourceHref != lastScrolledResourceHref {
             lastScrolledResourceHref = paragraph.resourceHref
-            lastScrolledParagraphId = paraId
             navigationTask?.cancel()
             navigationTask = Task {
                 await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
             }
-        } else if paragraphChanged {
-            lastScrolledParagraphId = paraId
-            navigationTask?.cancel()
-            navigationTask = Task {
-                await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
-            }
-        } else {
-            let now = Date()
-            if now.timeIntervalSince(lastScrollCheckTime) >= 0.5 {
-                lastScrollCheckTime = now
-                if bookStore.isPagedMode {
-                    // In paged mode, JS can't turn pages. Use go(to:) which is
-                    // effectively a no-op when the word is already on the current page.
-                    navigationTask?.cancel()
-                    navigationTask = Task {
-                        await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
-                    }
-                } else {
-                    scrollHighlightIntoViewIfNeeded(nav: nav)
-                }
-            }
-        }
-    }
-
-    private func scrollHighlightIntoViewIfNeeded(nav: EPUBNavigatorViewController) {
-        Task {
-            let js = """
-            (function() {
-                var group = document.querySelector('[data-group="tts"]');
-                if (!group) return 'no-group';
-                var items = group.querySelectorAll('div[data-style]');
-                var el = items.length > 0 ? items[items.length - 1] : null;
-                if (!el) {
-                    var allDivs = group.querySelectorAll('div');
-                    el = allDivs.length > 0 ? allDivs[allDivs.length - 1] : null;
-                }
-                if (!el) return 'no-element|children=' + group.childNodes.length;
-                var rect = el.getBoundingClientRect();
-                var vh = window.innerHeight;
-                var vw = window.innerWidth;
-                if (rect.top >= 0 && rect.bottom <= vh * 0.8) return 'visible';
-                var targetY = window.scrollY + rect.top - vh * 0.3;
-                window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
-                return 'scrolled|rect=' + Math.round(rect.top) + ',' + Math.round(rect.bottom) + '|vh=' + vh;
-            })()
-            """
-            let result = await nav.evaluateJavaScript(js)
-            #if DEBUG
-            if case .success(let val) = result {
-                let str = (val as? String) ?? "nil"
-                if str != "visible" {
-                    print("[TTS-SCROLL] \(str)")
-                }
-            } else if case .failure(let err) = result {
-                print("[TTS-SCROLL] error: \(err)")
-            }
-            #endif
         }
     }
 
