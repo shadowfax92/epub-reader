@@ -25,6 +25,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     private var audioCache: [Int: CachedAudio] = [:]
     private let maxCacheSize = 20
 
+    private var provider: TTSProviderType = .elevenLabs
     private var apiKey: String = ""
     private var voiceId: String = ""
     var speed: Double = 1.0 {
@@ -44,13 +45,15 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         let timings: [WordTiming]
     }
 
-    func configure(apiKey: String, voiceId: String, speed: Double, onPositionUpdate: @escaping (ReadingPosition) -> Void) {
+    func configure(provider: TTSProviderType, apiKey: String, voiceId: String, speed: Double, onPositionUpdate: @escaping (ReadingPosition) -> Void) {
+        let providerChanged = self.provider != provider
         let voiceChanged = self.voiceId != voiceId
+        self.provider = provider
         self.apiKey = apiKey
         self.voiceId = voiceId
         self.speed = speed
         self.onPositionUpdate = onPositionUpdate
-        if voiceChanged {
+        if voiceChanged || providerChanged {
             audioCache.removeAll()
         }
         configureAudioSession()
@@ -257,22 +260,11 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         let text = paragraph.words.map(\.text).joined(separator: " ")
 
         do {
-            let response = try await ElevenLabsService.shared.generateSpeech(
+            let (audioData, timings) = try await generateAudio(
                 text: text,
-                voiceId: voiceId,
-                apiKey: apiKey,
-                previousText: paragraphText(at: idx - 1),
-                nextText: paragraphText(at: idx + 1)
+                words: paragraph.words,
+                paragraphIndex: idx
             )
-
-            let timings = mapCharacterTimingsToWords(
-                alignment: response.normalized_alignment ?? response.alignment,
-                words: paragraph.words
-            )
-
-            guard let audioData = Data(base64Encoded: response.audio_base64) else {
-                throw ElevenLabsError.invalidResponse
-            }
 
             cacheAudio(audioData: audioData, timings: timings, paragraphId: paragraph.id)
 
@@ -465,27 +457,17 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
         let paragraph = allParagraphs[idx]
 
-        // Already cached — skip the API call
         if audioCache[paragraph.id] != nil { return }
 
         let text = paragraph.words.map(\.text).joined(separator: " ")
         guard !text.isEmpty else { return }
 
         do {
-            let response = try await ElevenLabsService.shared.generateSpeech(
+            let (audioData, timings) = try await generateAudio(
                 text: text,
-                voiceId: voiceId,
-                apiKey: apiKey,
-                previousText: paragraphText(at: idx - 1),
-                nextText: paragraphText(at: idx + 1)
+                words: paragraph.words,
+                paragraphIndex: idx
             )
-
-            let timings = mapCharacterTimingsToWords(
-                alignment: response.normalized_alignment ?? response.alignment,
-                words: paragraph.words
-            )
-
-            guard let audioData = Data(base64Encoded: response.audio_base64) else { return }
 
             cacheAudio(audioData: audioData, timings: timings, paragraphId: paragraph.id)
             prefetchedAudio = audioData
@@ -494,6 +476,67 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         } catch {
             // Prefetch failure is non-critical
         }
+    }
+
+    // MARK: - Provider-Aware Audio Generation
+
+    private func generateAudio(text: String, words: [BookWord], paragraphIndex: Int) async throws -> (Data, [WordTiming]) {
+        switch provider {
+        case .elevenLabs:
+            let response = try await ElevenLabsService.shared.generateSpeech(
+                text: text,
+                voiceId: voiceId,
+                apiKey: apiKey,
+                previousText: paragraphText(at: paragraphIndex - 1),
+                nextText: paragraphText(at: paragraphIndex + 1)
+            )
+            let timings = mapCharacterTimingsToWords(
+                alignment: response.normalized_alignment ?? response.alignment,
+                words: words
+            )
+            guard let audioData = Data(base64Encoded: response.audio_base64) else {
+                throw ElevenLabsError.invalidResponse
+            }
+            return (audioData, timings)
+
+        case .openAI:
+            let audioData = try await OpenAITTSService.shared.generateSpeech(
+                text: text,
+                voiceId: voiceId,
+                apiKey: apiKey
+            )
+            let timings = estimateWordTimings(words: words, audioData: audioData)
+            return (audioData, timings)
+        }
+    }
+
+    private func estimateWordTimings(words: [BookWord], audioData: Data) -> [WordTiming] {
+        guard !words.isEmpty else { return [] }
+
+        guard let tempPlayer = try? AVAudioPlayer(data: audioData) else { return [] }
+        let duration = tempPlayer.duration
+
+        let totalCharsWithSpaces = words.reduce(0) { $0 + $1.text.count } + max(0, words.count - 1)
+        guard totalCharsWithSpaces > 0, duration > 0 else { return [] }
+
+        let timePerChar = duration / Double(totalCharsWithSpaces)
+        var timings: [WordTiming] = []
+        var currentTime: Double = 0
+
+        for (i, word) in words.enumerated() {
+            let wordDuration = Double(word.text.count) * timePerChar
+            timings.append(WordTiming(
+                globalWordIndex: word.id,
+                startTime: currentTime,
+                endTime: currentTime + wordDuration
+            ))
+            currentTime += wordDuration
+            if i < words.count - 1 {
+                currentTime += timePerChar
+            }
+        }
+
+        return timings
     }
 
     private func saveCurrentPosition() {

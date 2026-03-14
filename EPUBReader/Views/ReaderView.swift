@@ -453,8 +453,9 @@ struct ReaderView: View {
     private func reconfigurePlayback() {
         currentSpeed = bookStore.playbackSpeed
         playbackManager.configure(
-            apiKey: bookStore.apiKey,
-            voiceId: bookStore.selectedVoiceId,
+            provider: bookStore.ttsProvider,
+            apiKey: bookStore.activeApiKey,
+            voiceId: bookStore.activeVoiceId,
             speed: currentSpeed,
             onPositionUpdate: { position in
                 bookStore.saveReadingPosition(bookId: book.id, position: position)
@@ -468,7 +469,7 @@ struct ReaderView: View {
             return
         }
 
-        if bookStore.apiKey.isEmpty || bookStore.selectedVoiceId.isEmpty {
+        if bookStore.activeApiKey.isEmpty || bookStore.activeVoiceId.isEmpty {
             playbackManager.error = "Set your API key and voice in Settings first."
             return
         }
@@ -492,7 +493,7 @@ struct ReaderView: View {
     }
 
     private func startTTSFromSelection(_ selection: Selection) {
-        guard !bookStore.apiKey.isEmpty, !bookStore.selectedVoiceId.isEmpty else {
+        guard !bookStore.activeApiKey.isEmpty, !bookStore.activeVoiceId.isEmpty else {
             playbackManager.error = "Set your API key and voice in Settings first."
             return
         }
@@ -534,7 +535,7 @@ struct ReaderView: View {
         // Start TTS from chapter start
         if let parsedBook,
            let index = parsedBook.flatParagraphs.firstIndex(where: { $0.id == firstParagraph.id }),
-           !bookStore.apiKey.isEmpty, !bookStore.selectedVoiceId.isEmpty {
+           !bookStore.activeApiKey.isEmpty, !bookStore.activeVoiceId.isEmpty {
             reconfigurePlayback()
             playbackManager.play(fromParagraphIndex: index, wordIndex: firstParagraph.words.first?.id ?? 0)
         }

@@ -7,6 +7,13 @@ class BookStore: ObservableObject {
 
     private let defaults = UserDefaults.standard
 
+    var ttsProvider: TTSProviderType {
+        get { TTSProviderType(rawValue: defaults.string(forKey: "ttsProvider") ?? "") ?? .elevenLabs }
+        set { objectWillChange.send(); defaults.set(newValue.rawValue, forKey: "ttsProvider") }
+    }
+
+    // MARK: - ElevenLabs Settings
+
     var apiKey: String {
         get { defaults.string(forKey: "elevenLabsApiKey") ?? "" }
         set { objectWillChange.send(); defaults.set(newValue, forKey: "elevenLabsApiKey") }
@@ -20,6 +27,46 @@ class BookStore: ObservableObject {
     var selectedVoiceName: String {
         get { defaults.string(forKey: "selectedVoiceName") ?? "" }
         set { objectWillChange.send(); defaults.set(newValue, forKey: "selectedVoiceName") }
+    }
+
+    // MARK: - OpenAI Settings
+
+    var openAIApiKey: String {
+        get { defaults.string(forKey: "openAIApiKey") ?? "" }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "openAIApiKey") }
+    }
+
+    var openAIVoiceId: String {
+        get { defaults.string(forKey: "openAIVoiceId") ?? "" }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "openAIVoiceId") }
+    }
+
+    var openAIVoiceName: String {
+        get { defaults.string(forKey: "openAIVoiceName") ?? "" }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "openAIVoiceName") }
+    }
+
+    // MARK: - Active Provider Helpers
+
+    var activeApiKey: String {
+        switch ttsProvider {
+        case .elevenLabs: return apiKey
+        case .openAI: return openAIApiKey
+        }
+    }
+
+    var activeVoiceId: String {
+        switch ttsProvider {
+        case .elevenLabs: return selectedVoiceId
+        case .openAI: return openAIVoiceId
+        }
+    }
+
+    var activeVoiceName: String {
+        switch ttsProvider {
+        case .elevenLabs: return selectedVoiceName
+        case .openAI: return openAIVoiceName
+        }
     }
 
     var playbackSpeed: Double {

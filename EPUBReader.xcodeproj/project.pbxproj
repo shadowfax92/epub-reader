@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -13,6 +13,8 @@
 		17DE1C7A7BD2680971BF4475 /* ReadiumService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB0D8D9E48BD40246619D80 /* ReadiumService.swift */; };
 		1E037CC7B22DE99549511CD5 /* TTSHighlightHelperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4740C85F149A30DE1FBBD7FE /* TTSHighlightHelperTests.swift */; };
 		1F95B870B78E615AB3535D4D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4D3784CA2978ED65D6818863 /* Assets.xcassets */; };
+		3C196A2C87E589FBD705EF33 /* TTSProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03006F291EE34A5E4B8A23DC /* TTSProvider.swift */; };
+		3C35535915C1C4599239306C /* OpenAITTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 916F58B595EB1A7472C75897 /* OpenAITTSService.swift */; };
 		490AD5683F1E8117210ADA16 /* ReadiumReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D757BBA859CACB283ECC9533 /* ReadiumReaderView.swift */; };
 		50C1BDE27582540A0D8CA267 /* AudioPlaybackManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 803C391E9257F2B72D408495 /* AudioPlaybackManager.swift */; };
 		5A00B4FC73FB66D666DDD098 /* TTSHighlightHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 515BDFC4571487A438A9FABF /* TTSHighlightHelper.swift */; };
@@ -39,15 +41,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		03006F291EE34A5E4B8A23DC /* TTSProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSProvider.swift; sourceTree = "<group>"; };
 		4740C85F149A30DE1FBBD7FE /* TTSHighlightHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSHighlightHelperTests.swift; sourceTree = "<group>"; };
 		4D3784CA2978ED65D6818863 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		512B74881354E3CEEC33024F /* EPUBReaderTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EPUBReaderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		515BDFC4571487A438A9FABF /* TTSHighlightHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSHighlightHelper.swift; sourceTree = "<group>"; };
 		5D79AC2E138A4BEAE46E5BE4 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		5EA43EAC7B6FD78876267B56 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		6A2106781EFB3E019745CD97 /* EPUBReader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EPUBReader.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6A2106781EFB3E019745CD97 /* EPUBReader.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = EPUBReader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		783E9DE95ACD9E094ECA7719 /* HighlightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightsView.swift; sourceTree = "<group>"; };
 		803C391E9257F2B72D408495 /* AudioPlaybackManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlaybackManager.swift; sourceTree = "<group>"; };
+		916F58B595EB1A7472C75897 /* OpenAITTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAITTSService.swift; sourceTree = "<group>"; };
 		94A07AF8E6C5438C2EAC2D00 /* Book.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Book.swift; sourceTree = "<group>"; };
 		9A2D4A313666A4D493174F12 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
 		9A42C62234F8995A951AEB8B /* ElevenLabsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElevenLabsService.swift; sourceTree = "<group>"; };
@@ -96,6 +100,7 @@
 			children = (
 				94A07AF8E6C5438C2EAC2D00 /* Book.swift */,
 				E222C91BB3C6BB4728DE80DD /* BookStore.swift */,
+				03006F291EE34A5E4B8A23DC /* TTSProvider.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -106,6 +111,7 @@
 				803C391E9257F2B72D408495 /* AudioPlaybackManager.swift */,
 				9A42C62234F8995A951AEB8B /* ElevenLabsService.swift */,
 				A0585283C7FCD0CC23D4B72A /* EPUBParserService.swift */,
+				916F58B595EB1A7472C75897 /* OpenAITTSService.swift */,
 				ADB0D8D9E48BD40246619D80 /* ReadiumService.swift */,
 			);
 			path = Services;
@@ -208,6 +214,7 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					E7D493C39D8564B6DF1E7C69 = {
+						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -225,6 +232,7 @@
 			packageReferences = (
 				16C02E0DF58490656E74587E /* XCRemoteSwiftPackageReference "swift-toolkit" */,
 			);
+			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -258,11 +266,13 @@
 				101709F650D9C74F15BA777D /* ElevenLabsService.swift in Sources */,
 				018DA436B675890E863DBF2E /* HighlightsView.swift in Sources */,
 				F79B88E47889C320F80555FD /* LibraryView.swift in Sources */,
+				3C35535915C1C4599239306C /* OpenAITTSService.swift in Sources */,
 				1734CB6A6E8C2FACE21629F8 /* ReaderView.swift in Sources */,
 				490AD5683F1E8117210ADA16 /* ReadiumReaderView.swift in Sources */,
 				17DE1C7A7BD2680971BF4475 /* ReadiumService.swift in Sources */,
 				9E847438A5BA225FBB400BE4 /* SettingsView.swift in Sources */,
 				5A00B4FC73FB66D666DDD098 /* TTSHighlightHelper.swift in Sources */,
+				3C196A2C87E589FBD705EF33 /* TTSProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -311,7 +321,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 8YMKWU47S5;
+				DEVELOPMENT_TEAM = "";
 				INFOPLIST_FILE = EPUBReader/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -470,7 +480,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 8YMKWU47S5;
+				DEVELOPMENT_TEAM = "";
 				INFOPLIST_FILE = EPUBReader/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
