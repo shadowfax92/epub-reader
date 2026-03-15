@@ -391,14 +391,14 @@ struct ReaderView: View {
                 action: #selector(ReaderContainerViewController.highlightSelection(_:))
             )
             let speakAction = EditingAction(
-                title: "Speak from Here",
+                title: "Speak",
                 action: #selector(ReaderContainerViewController.speakFromHere(_:))
             )
             let nav = try ReadiumService.shared.makeNavigator(
                 publication: pub,
                 initialLocation: savedLocator(),
                 preferences: preferences,
-                editingActions: [.copy, highlightAction, speakAction]
+                editingActions: [.copy, .lookup, highlightAction, speakAction]
             )
 
             let delegate = ReaderNavigatorDelegate(
