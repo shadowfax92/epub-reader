@@ -46,9 +46,11 @@ class ReaderContainerViewController: UIViewController {
         navigator.didMove(toParent: self)
     }
 
-    @objc func speakFromHere(_ sender: Any?) {
-        guard let selection = navigator.currentSelection else { return }
-        onSpeakFromSelection?(selection)
+    @objc func lookupSelection(_ sender: Any?) {
+        guard let text = navigator.currentSelection?.locator.text.highlight, !text.isEmpty else { return }
+        let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dictVC = UIReferenceLibraryViewController(term: term)
+        present(dictVC, animated: true)
     }
 
     @objc func highlightSelection(_ sender: Any?) {
@@ -56,8 +58,24 @@ class ReaderContainerViewController: UIViewController {
         onHighlightSelection?(selection)
     }
 
+    @objc func speakFromHere(_ sender: Any?) {
+        guard let selection = navigator.currentSelection else { return }
+        onSpeakFromSelection?(selection)
+    }
+
+    @objc func copySelection(_ sender: Any?) {
+        guard let text = navigator.currentSelection?.locator.text.highlight, !text.isEmpty else { return }
+        UIPasteboard.general.string = text
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(speakFromHere(_:)) || action == #selector(highlightSelection(_:)) {
+        let customActions: [Selector] = [
+            #selector(lookupSelection(_:)),
+            #selector(highlightSelection(_:)),
+            #selector(speakFromHere(_:)),
+            #selector(copySelection(_:)),
+        ]
+        if customActions.contains(action) {
             return navigator.currentSelection != nil
         }
         return super.canPerformAction(action, withSender: sender)

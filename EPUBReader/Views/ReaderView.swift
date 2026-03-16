@@ -386,6 +386,10 @@ struct ReaderView: View {
             // Build initial preferences from current theme/font
             let preferences = buildPreferences()
 
+            let lookupAction = EditingAction(
+                title: "Look Up",
+                action: #selector(ReaderContainerViewController.lookupSelection(_:))
+            )
             let highlightAction = EditingAction(
                 title: "Highlight",
                 action: #selector(ReaderContainerViewController.highlightSelection(_:))
@@ -394,11 +398,15 @@ struct ReaderView: View {
                 title: "Speak",
                 action: #selector(ReaderContainerViewController.speakFromHere(_:))
             )
+            let copyAction = EditingAction(
+                title: "Copy",
+                action: #selector(ReaderContainerViewController.copySelection(_:))
+            )
             let nav = try ReadiumService.shared.makeNavigator(
                 publication: pub,
                 initialLocation: savedLocator(),
                 preferences: preferences,
-                editingActions: [.copy, .lookup, highlightAction, speakAction]
+                editingActions: [lookupAction, highlightAction, speakAction, copyAction]
             )
 
             let delegate = ReaderNavigatorDelegate(
