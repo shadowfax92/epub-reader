@@ -7,6 +7,8 @@ struct SettingsView: View {
 
     @State private var elevenLabsKeyInput: String = ""
     @State private var openAIKeyInput: String = ""
+    @State private var cloudSyncEndpointInput: String = ""
+    @State private var cloudSyncSecretInput: String = ""
     @State private var elevenLabsVoices: [ElevenLabsService.Voice] = []
     @State private var isLoadingVoices = false
     @State private var voiceError: String?
@@ -79,6 +81,31 @@ struct SettingsView: View {
                     .frame(width: 160)
                 }
             }
+
+            Section {
+                credentialField(
+                    title: "Worker URL",
+                    placeholder: "https://reader-sync.example.workers.dev",
+                    text: $cloudSyncEndpointInput,
+                    secure: false,
+                    onChange: { bookStore.cloudSyncEndpoint = $0 }
+                )
+                credentialField(
+                    title: "Shared Secret",
+                    placeholder: "Same secret on both phones",
+                    text: $cloudSyncSecretInput,
+                    secure: true,
+                    onChange: { bookStore.cloudSyncSecret = $0 }
+                )
+
+                LabeledContent("Status") {
+                    Text(bookStore.cloudSyncStatus)
+                }
+            } header: {
+                Text("Reading Sync")
+            } footer: {
+                Text("Cross-device resume uses a Cloudflare Worker backed by R2. Configure the same Worker URL and shared secret on both phones. The app syncs position metadata only, not book files.")
+            }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
@@ -90,6 +117,8 @@ struct SettingsView: View {
         .onAppear {
             elevenLabsKeyInput = bookStore.apiKey
             openAIKeyInput = bookStore.openAIApiKey
+            cloudSyncEndpointInput = bookStore.cloudSyncEndpoint
+            cloudSyncSecretInput = bookStore.cloudSyncSecret
             if bookStore.ttsProvider == .elevenLabs && !bookStore.apiKey.isEmpty && elevenLabsVoices.isEmpty {
                 Task { await loadElevenLabsVoices() }
             }
@@ -104,7 +133,13 @@ struct SettingsView: View {
     @ViewBuilder
     private var elevenLabsSection: some View {
         Section {
-            apiKeyField(text: $elevenLabsKeyInput, onChange: { bookStore.apiKey = $0 })
+            credentialField(
+                title: "API Key",
+                placeholder: "API Key",
+                text: $elevenLabsKeyInput,
+                secure: true,
+                onChange: { bookStore.apiKey = $0 }
+            )
 
             Button {
                 Task { await loadElevenLabsVoices() }
@@ -179,7 +214,13 @@ struct SettingsView: View {
     @ViewBuilder
     private var openAISection: some View {
         Section {
-            apiKeyField(text: $openAIKeyInput, onChange: { bookStore.openAIApiKey = $0 })
+            credentialField(
+                title: "API Key",
+                placeholder: "API Key",
+                text: $openAIKeyInput,
+                secure: true,
+                onChange: { bookStore.openAIApiKey = $0 }
+            )
         } header: {
             Text("OpenAI")
         } footer: {
@@ -227,22 +268,39 @@ struct SettingsView: View {
     // MARK: - Shared Components
 
     @ViewBuilder
-    private func apiKeyField(text: Binding<String>, onChange: @escaping (String) -> Void) -> some View {
+    private func credentialField(
+        title: String,
+        placeholder: String,
+        text: Binding<String>,
+        secure: Bool,
+        onChange: @escaping (String) -> Void
+    ) -> some View {
         HStack {
-            if showApiKey {
-                TextField("API Key", text: text)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
+            Text(title)
+                .frame(width: 92, alignment: .leading)
+            if secure {
+                if showApiKey {
+                    TextField(placeholder, text: text)
+                        .textContentType(.password)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                } else {
+                    SecureField(placeholder, text: text)
+                        .textContentType(.password)
+                }
             } else {
-                SecureField("API Key", text: text)
-                    .textContentType(.password)
+                TextField(placeholder, text: text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
             }
-            Button {
-                showApiKey.toggle()
-            } label: {
-                Image(systemName: showApiKey ? "eye.slash" : "eye")
-                    .foregroundStyle(.secondary)
+            if secure {
+                Button {
+                    showApiKey.toggle()
+                } label: {
+                    Image(systemName: showApiKey ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .onChange(of: text.wrappedValue) { _, newValue in

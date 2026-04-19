@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "reading-progress-sync",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-19",
+  "r2_buckets": [
+    {
+      "binding": "READING_PROGRESS",
+      "bucket_name": "reading-progress-sync"
+    }
+  ]
+}
