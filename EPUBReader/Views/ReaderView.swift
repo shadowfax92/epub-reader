@@ -23,6 +23,10 @@ struct ReaderView: View {
     @State private var lastScrolledResourceHref: String?
     @State private var hasTextSelection = false
     @State private var navigationTask: Task<Void, Never>?
+    @State private var paragraphsById: [Int: BookParagraph] = [:]
+    @State private var cachedTTSParagraphId: Int?
+    @State private var cachedTTSDecorations: [Int: Decoration] = [:]
+    @State private var lastRenderedWordIndex: Int?
 
     private let speedOptions: [Double] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.5]
 
@@ -30,7 +34,7 @@ struct ReaderView: View {
 
     private var bookProgressPercent: Int? {
         guard let total = parsedBook?.totalWords, total > 0 else { return nil }
-        let current = playbackManager.currentGlobalWordIndex
+        let current = playbackManager.currentPlaybackWordIndex
         return min(100, max(0, current * 100 / total))
     }
 
@@ -66,6 +70,7 @@ struct ReaderView: View {
         .task { await loadBook() }
         .onDisappear {
             playbackManager.stop()
+            navigationTask?.cancel()
         }
         .onChange(of: playbackManager.isPlaying) { _, playing in
             if playing { scheduleHideControls() }
@@ -378,12 +383,16 @@ struct ReaderView: View {
 
             let parsed = try await EPUBParserService.shared.parseBook(from: book, publication: pub)
             parsedBook = parsed
+            paragraphsById = Dictionary(uniqueKeysWithValues: parsed.flatParagraphs.map { ($0.id, $0) })
+            cachedTTSParagraphId = nil
+            cachedTTSDecorations = [:]
+            lastRenderedWordIndex = nil
 
             playbackManager.setBook(paragraphs: parsed.flatParagraphs)
             currentSpeed = bookStore.playbackSpeed
             reconfigurePlayback()
+            let readingState = await bookStore.readingState(for: book)
 
-            // Build initial preferences from current theme/font
             let preferences = buildPreferences()
 
             let lookupAction = EditingAction(
@@ -404,7 +413,7 @@ struct ReaderView: View {
             )
             let nav = try ReadiumService.shared.makeNavigator(
                 publication: pub,
-                initialLocation: savedLocator(),
+                initialLocation: locator(from: readingState?.locatorJSON),
                 preferences: preferences,
                 editingActions: [lookupAction, highlightAction, speakAction, copyAction]
             )
@@ -422,7 +431,7 @@ struct ReaderView: View {
                 },
                 onLocationChanged: { locator in
                     if let jsonString = locator.jsonString {
-                        UserDefaults.standard.set(jsonString, forKey: "locator_\(book.id.uuidString)")
+                        bookStore.saveLocator(book: book, locatorJSONString: jsonString)
                     }
                 },
                 onSelectionChanged: { [self] _ in
@@ -432,7 +441,7 @@ struct ReaderView: View {
             nav.delegate = delegate
             navigatorDelegate = delegate
 
-            if let position = bookStore.getReadingPosition(bookId: book.id) {
+            if let position = readingState?.position {
                 playbackManager.currentGlobalWordIndex = position.globalWordIndex
                 let paraIdx = min(position.paragraphIndex, parsed.flatParagraphs.count - 1)
                 if paraIdx >= 0 {
@@ -453,8 +462,8 @@ struct ReaderView: View {
         }
     }
 
-    private func savedLocator() -> Locator? {
-        guard let jsonString = UserDefaults.standard.string(forKey: "locator_\(book.id.uuidString)") else { return nil }
+    private func locator(from jsonString: String?) -> Locator? {
+        guard let jsonString else { return nil }
         return try? Locator(jsonString: jsonString)
     }
 
@@ -466,7 +475,7 @@ struct ReaderView: View {
             voiceId: bookStore.activeVoiceId,
             speed: currentSpeed,
             onPositionUpdate: { position in
-                bookStore.saveReadingPosition(bookId: book.id, position: position)
+                bookStore.saveReadingPosition(book: book, position: position)
             }
         )
     }
@@ -494,7 +503,7 @@ struct ReaderView: View {
             return
         }
 
-        let position = bookStore.getReadingPosition(bookId: book.id)
+        let position = bookStore.getReadingPosition(book: book)
         let paragraphIdx = position?.paragraphIndex ?? 0
         let wordIdx = position?.globalWordIndex ?? 0
         playbackManager.play(fromParagraphIndex: paragraphIdx, wordIndex: wordIdx)
@@ -552,78 +561,79 @@ struct ReaderView: View {
     // MARK: - Decoration Highlighting
 
     private func updateWordHighlight() {
-        guard let nav = navigator, let parsedBook else { return }
+        guard let nav = navigator else { return }
         let wordIndex = playbackManager.currentGlobalWordIndex
         let paraId = playbackManager.currentParagraphId
 
-        guard let paragraph = parsedBook.flatParagraphs.first(where: { $0.id == paraId }),
+        guard let paragraph = paragraphsById[paraId],
               paragraph.words.contains(where: { $0.id == wordIndex }),
-              let hrefURL = AnyURL(string: paragraph.resourceHref) else {
+              let decoration = ttsDecoration(for: paragraph, wordIndex: wordIndex) else {
             nav.apply(decorations: [], in: "tts")
+            lastRenderedWordIndex = nil
             return
         }
 
-        let wordPosition = paragraph.words.firstIndex(where: { $0.id == wordIndex }) ?? 0
-        let ctx = TTSHighlightHelper.buildTextContext(words: paragraph.words, wordPosition: wordPosition)
-
-        let locator = Locator(
-            href: hrefURL,
-            mediaType: .xhtml,
-            text: Locator.Text(
-                after: ctx.after,
-                before: ctx.before,
-                highlight: ctx.highlight
-            )
-        )
-
-        let decoration = Decoration(
-            id: "tts-word",
-            locator: locator,
-            style: .highlight(tint: .systemBlue, isActive: true)
-        )
-
-        #if DEBUG
-        print("[TTS-HL] word='\(ctx.highlight)' para=\(paraId) href=\(paragraph.resourceHref) before=\(ctx.before?.count ?? 0)ch after=\(ctx.after?.count ?? 0)ch")
-        #endif
-
+        guard lastRenderedWordIndex != wordIndex else { return }
+        lastRenderedWordIndex = wordIndex
         nav.apply(decorations: [decoration], in: "tts")
 
-        // Only navigate when the resource (chapter) changes — no auto-scrolling
         if paragraph.resourceHref != lastScrolledResourceHref {
             lastScrolledResourceHref = paragraph.resourceHref
             navigationTask?.cancel()
             navigationTask = Task {
-                _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+                _ = await nav.go(to: decoration.locator, options: NavigatorGoOptions(animated: true))
             }
         }
     }
 
     private func jumpToCurrentPosition() {
-        guard let nav = navigator, let parsedBook else { return }
+        guard let nav = navigator else { return }
         let paraId = playbackManager.currentParagraphId
-        let wordIndex = playbackManager.currentGlobalWordIndex
+        let wordIndex = playbackManager.currentPlaybackWordIndex
 
-        guard let paragraph = parsedBook.flatParagraphs.first(where: { $0.id == paraId }),
-              let hrefURL = AnyURL(string: paragraph.resourceHref) else { return }
-
-        let wordPosition = paragraph.words.firstIndex(where: { $0.id == wordIndex }) ?? 0
-        let ctx = TTSHighlightHelper.buildTextContext(words: paragraph.words, wordPosition: wordPosition)
-
-        let locator = Locator(
-            href: hrefURL,
-            mediaType: .xhtml,
-            text: Locator.Text(
-                after: ctx.after,
-                before: ctx.before,
-                highlight: ctx.highlight
-            )
-        )
+        guard let paragraph = paragraphsById[paraId],
+              let decoration = ttsDecoration(for: paragraph, wordIndex: wordIndex) else { return }
 
         lastScrolledResourceHref = paragraph.resourceHref
         navigationTask?.cancel()
         navigationTask = Task {
-            await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            _ = await nav.go(to: decoration.locator, options: NavigatorGoOptions(animated: true))
         }
+    }
+
+    private func ttsDecoration(for paragraph: BookParagraph, wordIndex: Int) -> Decoration? {
+        if cachedTTSParagraphId != paragraph.id {
+            cachedTTSParagraphId = paragraph.id
+            cachedTTSDecorations = buildTTSDecorations(for: paragraph)
+        }
+
+        return cachedTTSDecorations[wordIndex]
+    }
+
+    private func buildTTSDecorations(for paragraph: BookParagraph) -> [Int: Decoration] {
+        guard let hrefURL = AnyURL(string: paragraph.resourceHref) else { return [:] }
+
+        return Dictionary(uniqueKeysWithValues: paragraph.words.enumerated().map { wordPosition, word in
+            let ctx = TTSHighlightHelper.buildTextContext(
+                words: paragraph.words,
+                wordPosition: wordPosition
+            )
+            let locator = Locator(
+                href: hrefURL,
+                mediaType: .xhtml,
+                text: Locator.Text(
+                    after: ctx.after,
+                    before: ctx.before,
+                    highlight: ctx.highlight
+                )
+            )
+            let decoration = Decoration(
+                id: "tts-word",
+                locator: locator,
+                style: .highlight(tint: .systemBlue, isActive: true)
+            )
+            return (word.id, decoration)
+        })
     }
 
     // MARK: - Highlights

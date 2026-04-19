@@ -18,6 +18,7 @@ A simple iOS app that reads EPUB books out loud using [ElevenLabs](https://eleve
 - 🎨 **Themes** — light, dark, sepia, or match your system
 - ⏩ **Speed control** — 0.8x to 2.5x playback speed
 - 🔊 **Background audio** — keep listening with the screen off
+- ☁️ **Optional cross-device resume** — sync your last position with a tiny Cloudflare Worker + R2
 
 ---
 
@@ -69,6 +70,12 @@ open EPUBReader.xcodeproj
 - Paste your API key
 - Tap **Load Voices** and pick one you like
 
+### 6. Optional: Enable cross-device resume sync
+
+- Deploy the Worker in `cloudflare/reading-progress-sync/`
+- Paste the Worker URL and shared secret into **Settings → Reading Sync**
+- Use the same values on both phones
+
 ---
 
 ## 📖 How to Use
@@ -78,6 +85,7 @@ open EPUBReader.xcodeproj
 3. **Play narration** — tap anywhere to show controls, then hit ▶️
 4. **Select text to read from** — long-press to select text, then tap "Speak from Here"
 5. **Change voice/theme/speed** — use the controls overlay or ⚙️ settings
+6. **Sync your place across phones** — configure Reading Sync in Settings if you want shared resume position
 
 > 📕 **Need a free EPUB to try?** [Project Gutenberg](https://www.gutenberg.org) and [Standard Ebooks](https://standardebooks.org) have thousands.
 
@@ -91,6 +99,7 @@ open EPUBReader.xcodeproj
 | **EPUB rendering** | [Readium Swift Toolkit](https://github.com/readium/swift-toolkit) 3.7.0 |
 | **TTS** | [ElevenLabs API](https://elevenlabs.io/docs/api-reference/text-to-speech) (`eleven_flash_v2_5`) |
 | **Audio** | AVAudioPlayer with rate control |
+| **Resume sync** | Cloudflare Worker + R2 (optional) |
 | **Project gen** | [XcodeGen](https://github.com/yonaskolb/XcodeGen) |
 
 ---
@@ -110,6 +119,8 @@ EPUBReader/
 ## 💡 Notes
 
 - **ElevenLabs free tier** gives you ~10,000 characters/month — enough for a few chapters. The app caches audio locally so replaying sections doesn't cost extra API calls.
+- **Highlighting is tuned for weaker phones.** The app keeps exact playback position internally while reducing unnecessary UI churn for rapid word updates.
+- **Cloud sync stores reading metadata only.** The Worker stores just the last position and locator JSON, not your EPUB files.
 - **No paid Apple Developer account required.** Free provisioning profiles last 7 days — just re-run from Xcode when they expire.
 - **Background playback works.** Lock your phone and the narration keeps going.
 

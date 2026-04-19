@@ -1,6 +1,6 @@
-import Foundation
 import AVFoundation
 import Combine
+import Foundation
 
 @MainActor
 class AudioPlaybackManager: NSObject, ObservableObject {
@@ -11,41 +11,48 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     @Published var error: String?
 
     private var audioPlayer: AVAudioPlayer?
-    private var wordTimings: [WordTiming] = []
+    private var wordTimings: [PlaybackHighlightTiming] = []
     private var syncTimer: Timer?
     private var allParagraphs: [BookParagraph] = []
     private var currentParagraphArrayIndex: Int = 0
+    private var resolvedGlobalWordIndex: Int = 0
+    private var resolvedTimingIndex: Int = 0
+    private var lastPublishedHighlightTime = -Double.greatestFiniteMagnitude
 
     private var prefetchedAudio: Data?
-    private var prefetchedTimings: [WordTiming]?
+    private var prefetchedTimings: [PlaybackHighlightTiming]?
     private var prefetchedIndex: Int?
     private var prefetchTask: Task<Void, Never>?
 
-    // Cache generated audio to avoid re-spending credits on replayed paragraphs
     private var audioCache: [Int: CachedAudio] = [:]
     private let maxCacheSize = 20
+    private let minimumHighlightUpdateInterval = 0.1
 
     private var provider: TTSProviderType = .elevenLabs
     private var apiKey: String = ""
     private var voiceId: String = ""
+    private var onPositionUpdate: ((ReadingPosition) -> Void)?
+
     var speed: Double = 1.0 {
         didSet { audioPlayer?.rate = Float(speed) }
     }
 
-    private var onPositionUpdate: ((ReadingPosition) -> Void)?
-
-    struct WordTiming {
-        let globalWordIndex: Int
-        let startTime: Double
-        let endTime: Double
+    var currentPlaybackWordIndex: Int {
+        resolvedGlobalWordIndex > 0 ? resolvedGlobalWordIndex : currentGlobalWordIndex
     }
 
     private struct CachedAudio {
         let audioData: Data
-        let timings: [WordTiming]
+        let timings: [PlaybackHighlightTiming]
     }
 
-    func configure(provider: TTSProviderType, apiKey: String, voiceId: String, speed: Double, onPositionUpdate: @escaping (ReadingPosition) -> Void) {
+    func configure(
+        provider: TTSProviderType,
+        apiKey: String,
+        voiceId: String,
+        speed: Double,
+        onPositionUpdate: @escaping (ReadingPosition) -> Void
+    ) {
         let providerChanged = self.provider != provider
         let voiceChanged = self.voiceId != voiceId
         self.provider = provider
@@ -53,20 +60,24 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         self.voiceId = voiceId
         self.speed = speed
         self.onPositionUpdate = onPositionUpdate
+
         if voiceChanged || providerChanged {
             audioCache.removeAll()
         }
+
         configureAudioSession()
         setupInterruptionHandling()
     }
 
     func setBook(paragraphs: [BookParagraph]) {
-        self.allParagraphs = paragraphs
+        allParagraphs = paragraphs
         audioCache.removeAll()
+        resolvedGlobalWordIndex = 0
+        resolvedTimingIndex = 0
+        lastPublishedHighlightTime = -Double.greatestFiniteMagnitude
     }
 
     func play(fromParagraphIndex index: Int, wordIndex: Int = 0) {
-        // Stop playback but preserve prefetched audio
         saveCurrentPosition()
         audioPlayer?.stop()
         audioPlayer = nil
@@ -85,23 +96,20 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     }
 
     func togglePlayback() {
-        if isPlaying {
-            pause()
-        } else {
-            resume()
-        }
+        isPlaying ? pause() : resume()
     }
 
     func pause() {
         audioPlayer?.pause()
         isPlaying = false
         stopSyncTimer()
+        updateHighlight(force: true)
         saveCurrentPosition()
     }
 
     func resume() {
         guard let player = audioPlayer else {
-            play(fromParagraphIndex: currentParagraphArrayIndex)
+            play(fromParagraphIndex: currentParagraphArrayIndex, wordIndex: currentPlaybackWordIndex)
             return
         }
         player.play()
@@ -112,22 +120,24 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     func skip(seconds: Double) {
         guard let player = audioPlayer else { return }
         let newTime = player.currentTime + seconds
+
         if newTime < 0 {
             if currentParagraphArrayIndex > 0 {
                 play(fromParagraphIndex: currentParagraphArrayIndex - 1)
             } else {
                 player.currentTime = 0
-                updateHighlight()
+                updateHighlight(force: true)
             }
         } else if newTime >= player.duration {
             advanceToNext()
         } else {
             player.currentTime = newTime
-            updateHighlight()
+            updateHighlight(force: true)
         }
     }
 
     func stop() {
+        updateHighlight(force: true)
         saveCurrentPosition()
         audioPlayer?.stop()
         audioPlayer = nil
@@ -136,9 +146,8 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         prefetchTask?.cancel()
         prefetchedAudio = nil
         prefetchedTimings = nil
+        prefetchedIndex = nil
     }
-
-    // MARK: - Private
 
     private func configureAudioSession() {
         do {
@@ -160,17 +169,17 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             let typeValue = info?[AVAudioSessionInterruptionTypeKey] as? UInt
             let optionsValue = info?[AVAudioSessionInterruptionOptionKey] as? UInt
 
-            guard let typeValue, let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+            guard let typeValue, let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+                return
+            }
 
             Task { @MainActor in
                 if type == .began {
                     self.pause()
-                } else if type == .ended {
-                    if let optionsValue {
-                        let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-                        if options.contains(.shouldResume) {
-                            self.resume()
-                        }
+                } else if type == .ended, let optionsValue {
+                    let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                    if options.contains(.shouldResume) {
+                        self.resume()
                     }
                 }
             }
@@ -184,15 +193,15 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     }
 
     private func generateAndPlay(paragraphIndex: Int, startFromWordGlobal: Int = 0) async {
-        var idx = paragraphIndex
+        var index = paragraphIndex
 
-        while idx < allParagraphs.count {
-            let text = allParagraphs[idx].words.map(\.text).joined(separator: " ")
+        while index < allParagraphs.count {
+            let text = allParagraphs[index].words.map(\.text).joined(separator: " ")
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { break }
-            idx += 1
+            index += 1
         }
 
-        guard idx < allParagraphs.count else {
+        guard index < allParagraphs.count else {
             isPlaying = false
             isLoadingAudio = false
             return
@@ -205,47 +214,44 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             return
         }
 
-        currentParagraphArrayIndex = idx
-        let paragraph = allParagraphs[idx]
+        currentParagraphArrayIndex = index
+        let paragraph = allParagraphs[index]
 
-        // Check cache first — no API call needed
         if let cached = audioCache[paragraph.id] {
             do {
                 try startPlayback(
                     audioData: cached.audioData,
                     timings: cached.timings,
-                    paragraphIndex: idx,
+                    paragraphIndex: index,
                     paragraphId: paragraph.id,
                     startFromWordGlobal: startFromWordGlobal
                 )
                 prefetchTask?.cancel()
-                prefetchTask = Task { await prefetchNext(paragraphIndex: idx + 1) }
+                prefetchTask = Task { await prefetchNext(paragraphIndex: index + 1) }
                 return
             } catch {
                 audioCache.removeValue(forKey: paragraph.id)
             }
         }
 
-        // Check prefetch
         if let cachedAudio = prefetchedAudio,
            let cachedTimings = prefetchedTimings,
-           prefetchedIndex == idx {
+           prefetchedIndex == index {
             prefetchedAudio = nil
             prefetchedTimings = nil
             prefetchedIndex = nil
-
             cacheAudio(audioData: cachedAudio, timings: cachedTimings, paragraphId: paragraph.id)
 
             do {
                 try startPlayback(
                     audioData: cachedAudio,
                     timings: cachedTimings,
-                    paragraphIndex: idx,
+                    paragraphIndex: index,
                     paragraphId: paragraph.id,
                     startFromWordGlobal: startFromWordGlobal
                 )
                 prefetchTask?.cancel()
-                prefetchTask = Task { await prefetchNext(paragraphIndex: idx + 1) }
+                prefetchTask = Task { await prefetchNext(paragraphIndex: index + 1) }
                 return
             } catch {
                 self.error = "Playback error: \(error.localizedDescription)"
@@ -263,24 +269,19 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             let (audioData, timings) = try await generateAudio(
                 text: text,
                 words: paragraph.words,
-                paragraphIndex: idx
+                paragraphIndex: index
             )
-
             cacheAudio(audioData: audioData, timings: timings, paragraphId: paragraph.id)
-
             try startPlayback(
                 audioData: audioData,
                 timings: timings,
-                paragraphIndex: idx,
+                paragraphIndex: index,
                 paragraphId: paragraph.id,
                 startFromWordGlobal: startFromWordGlobal
             )
-
             isLoadingAudio = false
-
             prefetchTask?.cancel()
-            prefetchTask = Task { await prefetchNext(paragraphIndex: idx + 1) }
-
+            prefetchTask = Task { await prefetchNext(paragraphIndex: index + 1) }
         } catch {
             isLoadingAudio = false
             isPlaying = false
@@ -288,16 +289,20 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         }
     }
 
-    private func cacheAudio(audioData: Data, timings: [WordTiming], paragraphId: Int) {
-        if audioCache.count >= maxCacheSize {
-            if let oldest = audioCache.keys.min() {
-                audioCache.removeValue(forKey: oldest)
-            }
+    private func cacheAudio(audioData: Data, timings: [PlaybackHighlightTiming], paragraphId: Int) {
+        if audioCache.count >= maxCacheSize, let oldest = audioCache.keys.min() {
+            audioCache.removeValue(forKey: oldest)
         }
         audioCache[paragraphId] = CachedAudio(audioData: audioData, timings: timings)
     }
 
-    private func startPlayback(audioData: Data, timings: [WordTiming], paragraphIndex: Int, paragraphId: Int, startFromWordGlobal: Int) throws {
+    private func startPlayback(
+        audioData: Data,
+        timings: [PlaybackHighlightTiming],
+        paragraphIndex: Int,
+        paragraphId: Int,
+        startFromWordGlobal: Int
+    ) throws {
         audioPlayer?.stop()
         audioPlayer = try AVAudioPlayer(data: audioData)
         audioPlayer?.enableRate = true
@@ -308,28 +313,41 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         wordTimings = timings
         currentParagraphArrayIndex = paragraphIndex
         currentParagraphId = paragraphId
+        resolvedTimingIndex = 0
+        lastPublishedHighlightTime = -Double.greatestFiniteMagnitude
 
-        if startFromWordGlobal > 0, let timing = timings.first(where: { $0.globalWordIndex >= startFromWordGlobal }) {
-            audioPlayer?.currentTime = timing.startTime
+        if startFromWordGlobal > 0,
+           let timingIndex = timings.firstIndex(where: { $0.globalWordIndex >= startFromWordGlobal }) {
+            audioPlayer?.currentTime = timings[timingIndex].startTime
+            resolvedTimingIndex = timingIndex
+            resolvedGlobalWordIndex = timings[timingIndex].globalWordIndex
+            currentGlobalWordIndex = timings[timingIndex].globalWordIndex
+        } else if let firstTiming = timings.first {
+            resolvedTimingIndex = 0
+            resolvedGlobalWordIndex = firstTiming.globalWordIndex
+            currentGlobalWordIndex = firstTiming.globalWordIndex
+        } else if let firstWord = allParagraphs[paragraphIndex].words.first {
+            resolvedGlobalWordIndex = startFromWordGlobal > 0 ? startFromWordGlobal : firstWord.id
+            currentGlobalWordIndex = resolvedGlobalWordIndex
         }
 
-        if let firstWord = allParagraphs[paragraphIndex].words.first {
-            currentGlobalWordIndex = startFromWordGlobal > 0 ? startFromWordGlobal : firstWord.id
-        }
-
+        lastPublishedHighlightTime = audioPlayer?.currentTime ?? 0
         audioPlayer?.play()
         isPlaying = true
         startSyncTimer()
     }
 
-    private func mapCharacterTimingsToWords(alignment: ElevenLabsService.TTSAlignment?, words: [BookWord]) -> [WordTiming] {
-        guard let alignment = alignment,
+    private func mapCharacterTimingsToWords(
+        alignment: ElevenLabsService.TTSAlignment?,
+        words: [BookWord]
+    ) -> [PlaybackHighlightTiming] {
+        guard let alignment,
               !alignment.character_start_times_seconds.isEmpty else {
             return []
         }
 
         let charCount = alignment.character_start_times_seconds.count
-        var timings: [WordTiming] = []
+        var timings: [PlaybackHighlightTiming] = []
         var charIndex = 0
 
         for word in words {
@@ -338,9 +356,11 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
             let startTime = alignment.character_start_times_seconds[charIndex]
             let endCharIndex = min(charIndex + wordLength - 1, charCount - 1)
-            let endTime = alignment.character_end_times_seconds[min(endCharIndex, alignment.character_end_times_seconds.count - 1)]
+            let endTime = alignment.character_end_times_seconds[
+                min(endCharIndex, alignment.character_end_times_seconds.count - 1)
+            ]
 
-            timings.append(WordTiming(
+            timings.append(PlaybackHighlightTiming(
                 globalWordIndex: word.id,
                 startTime: startTime,
                 endTime: endTime
@@ -349,8 +369,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             charIndex += wordLength + 1
             while charIndex < charCount && charIndex > 0 {
                 let chars = alignment.characters
-                if charIndex >= chars.count { break }
-                if chars[charIndex - 1] == " " { break }
+                if charIndex >= chars.count || chars[charIndex - 1] == " " { break }
                 charIndex += 1
             }
         }
@@ -372,16 +391,33 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         syncTimer = nil
     }
 
-    private func updateHighlight() {
-        guard let player = audioPlayer, player.isPlaying else { return }
-        let currentTime = player.currentTime
+    private func updateHighlight(force: Bool = false) {
+        guard let player = audioPlayer else { return }
+        guard !wordTimings.isEmpty else { return }
 
-        if let timing = wordTimings.last(where: { $0.startTime <= currentTime }) {
-            if timing.globalWordIndex != currentGlobalWordIndex {
-                currentGlobalWordIndex = timing.globalWordIndex
-            }
-        } else if let first = wordTimings.first {
-            currentGlobalWordIndex = first.globalWordIndex
+        let currentTime = player.currentTime
+        guard let timingIndex = PlaybackHighlightHelper.timingIndex(
+            for: currentTime,
+            timings: wordTimings,
+            previousIndex: resolvedTimingIndex
+        ) else {
+            return
+        }
+
+        resolvedTimingIndex = timingIndex
+        let resolvedWordIndex = wordTimings[timingIndex].globalWordIndex
+        resolvedGlobalWordIndex = resolvedWordIndex
+
+        if force || PlaybackHighlightHelper.shouldPublishHighlight(
+            resolvedWordIndex: resolvedWordIndex,
+            displayedWordIndex: currentGlobalWordIndex,
+            currentTime: currentTime,
+            lastPublishedTime: lastPublishedHighlightTime,
+            minimumInterval: minimumHighlightUpdateInterval,
+            isLastWord: timingIndex == wordTimings.count - 1
+        ) {
+            currentGlobalWordIndex = resolvedWordIndex
+            lastPublishedHighlightTime = currentTime
         }
     }
 
@@ -401,7 +437,6 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
         let paragraph = allParagraphs[nextIndex]
 
-        // Check cache first
         if let cached = audioCache[paragraph.id] {
             do {
                 try startPlayback(
@@ -419,14 +454,12 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             }
         }
 
-        // Check prefetch
         if let cachedAudio = prefetchedAudio,
            let cachedTimings = prefetchedTimings,
            prefetchedIndex == nextIndex {
             prefetchedAudio = nil
             prefetchedTimings = nil
             prefetchedIndex = nil
-
             cacheAudio(audioData: cachedAudio, timings: cachedTimings, paragraphId: paragraph.id)
 
             do {
@@ -449,13 +482,14 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     }
 
     private func prefetchNext(paragraphIndex: Int) async {
-        var idx = paragraphIndex
-        while idx < allParagraphs.count && allParagraphs[idx].words.isEmpty {
-            idx += 1
-        }
-        guard idx < allParagraphs.count else { return }
+        var index = paragraphIndex
 
-        let paragraph = allParagraphs[idx]
+        while index < allParagraphs.count && allParagraphs[index].words.isEmpty {
+            index += 1
+        }
+
+        guard index < allParagraphs.count else { return }
+        let paragraph = allParagraphs[index]
 
         if audioCache[paragraph.id] != nil { return }
 
@@ -466,21 +500,21 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             let (audioData, timings) = try await generateAudio(
                 text: text,
                 words: paragraph.words,
-                paragraphIndex: idx
+                paragraphIndex: index
             )
-
             cacheAudio(audioData: audioData, timings: timings, paragraphId: paragraph.id)
             prefetchedAudio = audioData
             prefetchedTimings = timings
-            prefetchedIndex = idx
+            prefetchedIndex = index
         } catch {
-            // Prefetch failure is non-critical
         }
     }
 
-    // MARK: - Provider-Aware Audio Generation
-
-    private func generateAudio(text: String, words: [BookWord], paragraphIndex: Int) async throws -> (Data, [WordTiming]) {
+    private func generateAudio(
+        text: String,
+        words: [BookWord],
+        paragraphIndex: Int
+    ) async throws -> (Data, [PlaybackHighlightTiming]) {
         switch provider {
         case .elevenLabs:
             let response = try await ElevenLabsService.shared.generateSpeech(
@@ -505,33 +539,34 @@ class AudioPlaybackManager: NSObject, ObservableObject {
                 voiceId: voiceId,
                 apiKey: apiKey
             )
-            let timings = estimateWordTimings(words: words, audioData: audioData)
-            return (audioData, timings)
+            return (audioData, estimateWordTimings(words: words, audioData: audioData))
         }
     }
 
-    private func estimateWordTimings(words: [BookWord], audioData: Data) -> [WordTiming] {
+    private func estimateWordTimings(
+        words: [BookWord],
+        audioData: Data
+    ) -> [PlaybackHighlightTiming] {
         guard !words.isEmpty else { return [] }
-
         guard let tempPlayer = try? AVAudioPlayer(data: audioData) else { return [] }
-        let duration = tempPlayer.duration
 
+        let duration = tempPlayer.duration
         let totalCharsWithSpaces = words.reduce(0) { $0 + $1.text.count } + max(0, words.count - 1)
         guard totalCharsWithSpaces > 0, duration > 0 else { return [] }
 
         let timePerChar = duration / Double(totalCharsWithSpaces)
-        var timings: [WordTiming] = []
-        var currentTime: Double = 0
+        var timings: [PlaybackHighlightTiming] = []
+        var currentTime = 0.0
 
-        for (i, word) in words.enumerated() {
+        for (index, word) in words.enumerated() {
             let wordDuration = Double(word.text.count) * timePerChar
-            timings.append(WordTiming(
+            timings.append(PlaybackHighlightTiming(
                 globalWordIndex: word.id,
                 startTime: currentTime,
                 endTime: currentTime + wordDuration
             ))
             currentTime += wordDuration
-            if i < words.count - 1 {
+            if index < words.count - 1 {
                 currentTime += timePerChar
             }
         }
@@ -541,14 +576,13 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
     private func saveCurrentPosition() {
         guard !allParagraphs.isEmpty else { return }
-        let paragraphIndex = currentParagraphArrayIndex
-        guard paragraphIndex < allParagraphs.count else { return }
-        let paragraph = allParagraphs[paragraphIndex]
+        guard currentParagraphArrayIndex < allParagraphs.count else { return }
 
+        let paragraph = allParagraphs[currentParagraphArrayIndex]
         onPositionUpdate?(ReadingPosition(
             chapterIndex: paragraph.chapterIndex,
-            paragraphIndex: paragraphIndex,
-            globalWordIndex: currentGlobalWordIndex
+            paragraphIndex: currentParagraphArrayIndex,
+            globalWordIndex: currentPlaybackWordIndex
         ))
     }
 }

@@ -7,6 +7,7 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     var author: String
     let fileName: String
     var dateAdded: Date
+    var syncIdentifier: String?
 
     var fileURL: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -14,10 +15,33 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     }
 }
 
-struct ReadingPosition: Codable {
+struct ReadingPosition: Codable, Equatable {
     var chapterIndex: Int
     var paragraphIndex: Int
     var globalWordIndex: Int
+}
+
+struct ReadingStateRecord: Codable, Equatable {
+    var position: ReadingPosition?
+    var locatorJSON: String?
+    var updatedAt: Int64
+
+    static func newest(local: ReadingStateRecord?, remote: ReadingStateRecord?) -> ReadingStateRecord? {
+        switch (local, remote) {
+        case (nil, nil):
+            return nil
+        case (.some(let local), nil):
+            return local
+        case (nil, .some(let remote)):
+            return remote
+        case (.some(let local), .some(let remote)):
+            return remote.updatedAt >= local.updatedAt ? remote : local
+        }
+    }
+
+    static func nowTimestamp() -> Int64 {
+        Int64(Date().timeIntervalSince1970 * 1000)
+    }
 }
 
 struct BookHighlight: Codable, Identifiable, Hashable {
