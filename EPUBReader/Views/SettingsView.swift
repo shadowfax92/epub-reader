@@ -3,6 +3,7 @@ import AVFoundation
 
 struct SettingsView: View {
     @EnvironmentObject var bookStore: BookStore
+    @EnvironmentObject var syncService: SyncService
     @Environment(\.dismiss) private var dismiss
 
     @State private var elevenLabsKeyInput: String = ""
@@ -17,6 +18,42 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("iCloud Sync") {
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    syncStatusView
+                }
+
+                if syncService.iCloudAvailable {
+                    Button {
+                        Task {
+                            await syncService.performFullSync()
+                        }
+                    } label: {
+                        HStack {
+                            Text("Sync Now")
+                            Spacer()
+                            if syncService.syncStatus == .syncing {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(syncService.syncStatus == .syncing)
+
+                    if let lastSync = syncService.lastSyncDate {
+                        HStack {
+                            Text("Last Synced")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(lastSync, style: .relative)
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                        }
+                    }
+                }
+            }
+
             Section {
                 Picker("Provider", selection: providerBinding) {
                     ForEach(TTSProviderType.allCases) { provider in
@@ -221,6 +258,31 @@ struct SettingsView: View {
                     Text(bookStore.openAIVoiceName)
                 }
             }
+        }
+    }
+
+    // MARK: - Sync Status
+
+    @ViewBuilder
+    private var syncStatusView: some View {
+        switch syncService.syncStatus {
+        case .idle:
+            Label("Connected", systemImage: "checkmark.icloud")
+                .foregroundStyle(.green)
+                .font(.caption)
+        case .syncing:
+            Label("Syncing", systemImage: "arrow.triangle.2.circlepath.icloud")
+                .foregroundStyle(.blue)
+                .font(.caption)
+        case .error(let message):
+            Label(message, systemImage: "exclamationmark.icloud")
+                .foregroundStyle(.red)
+                .font(.caption)
+                .lineLimit(1)
+        case .disabled:
+            Label("Not Signed In", systemImage: "xmark.icloud")
+                .foregroundStyle(.secondary)
+                .font(.caption)
         }
     }
 

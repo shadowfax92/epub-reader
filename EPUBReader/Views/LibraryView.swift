@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct LibraryView: View {
     @EnvironmentObject var bookStore: BookStore
+    @EnvironmentObject var syncService: SyncService
     @State private var showFilePicker = false
     @State private var showSettings = false
     @State private var importError: String?
@@ -40,6 +41,7 @@ struct LibraryView: View {
             NavigationStack {
                 SettingsView()
                     .environmentObject(bookStore)
+                    .environmentObject(syncService)
             }
         }
         .alert("Import Error", isPresented: $showError) {
@@ -77,16 +79,17 @@ struct LibraryView: View {
     private var bookList: some View {
         List {
             ForEach(bookStore.books) { book in
-                NavigationLink(value: book) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(book.title)
-                            .font(.headline)
-                            .lineLimit(2)
-                        Text(book.author)
-                            .font(.subheadline)
+                if book.hasLocalFile {
+                    NavigationLink(value: book) {
+                        bookRow(book)
+                    }
+                } else {
+                    HStack {
+                        bookRow(book)
+                        Spacer()
+                        Image(systemName: "icloud.and.arrow.down")
                             .foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 4)
                 }
             }
             .onDelete { indexSet in
@@ -100,6 +103,25 @@ struct LibraryView: View {
             ReaderView(book: book)
                 .environmentObject(bookStore)
         }
+    }
+
+    private func bookRow(_ book: BookMetadata) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(book.title)
+                .font(.headline)
+                .lineLimit(2)
+            HStack(spacing: 4) {
+                Text(book.author)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if !book.hasLocalFile {
+                    Text("- Import EPUB to read")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func handleFileImport(_ result: Result<[URL], Error>) {

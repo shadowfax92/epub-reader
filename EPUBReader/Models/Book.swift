@@ -7,10 +7,20 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     var author: String
     let fileName: String
     var dateAdded: Date
+    var modifiedDate: Date?
+    var isLocalOnly: Bool?
 
     var fileURL: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("Books").appendingPathComponent(fileName)
+    }
+
+    var hasLocalFile: Bool {
+        FileManager.default.fileExists(atPath: fileURL.path)
+    }
+
+    var effectiveModifiedDate: Date {
+        modifiedDate ?? dateAdded
     }
 }
 

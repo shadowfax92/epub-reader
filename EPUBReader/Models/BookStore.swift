@@ -119,16 +119,20 @@ class BookStore: ObservableObject {
         let publication = try await ReadiumService.shared.openPublication(at: destURL)
         let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
 
+        let now = Date()
         let book = BookMetadata(
             id: UUID(),
             title: parsed.title ?? fileName.replacingOccurrences(of: ".epub", with: ""),
             author: parsed.author ?? "Unknown Author",
             fileName: fileName,
-            dateAdded: Date()
+            dateAdded: now,
+            modifiedDate: now,
+            isLocalOnly: false
         )
 
         books.insert(book, at: 0)
-        saveBooks()
+        persistBooks()
+        Task { await SyncService.shared.pushBookMetadata(book) }
         return book
     }
 
@@ -137,12 +141,16 @@ class BookStore: ObservableObject {
         try? FileManager.default.removeItem(at: book.fileURL)
         defaults.removeObject(forKey: "position_\(book.id.uuidString)")
         defaults.removeObject(forKey: "highlights_\(book.id.uuidString)")
-        saveBooks()
+        persistBooks()
+        Task { await SyncService.shared.deleteBook(book.id) }
     }
 
-    func saveReadingPosition(bookId: UUID, position: ReadingPosition) {
+    func saveReadingPosition(bookId: UUID, position: ReadingPosition, syncToCloud: Bool = true) {
         if let data = try? JSONEncoder().encode(position) {
             defaults.set(data, forKey: "position_\(bookId.uuidString)")
+        }
+        if syncToCloud {
+            Task { await SyncService.shared.pushReadingPosition(position, bookId: bookId) }
         }
     }
 
@@ -162,12 +170,14 @@ class BookStore: ObservableObject {
         var highlights = getHighlights(bookId: bookId)
         highlights.append(highlight)
         saveHighlights(highlights, bookId: bookId)
+        Task { await SyncService.shared.pushHighlight(highlight, bookId: bookId) }
     }
 
     func removeHighlight(id: UUID, bookId: UUID) {
         var highlights = getHighlights(bookId: bookId)
         highlights.removeAll { $0.id == id }
         saveHighlights(highlights, bookId: bookId)
+        Task { await SyncService.shared.deleteHighlight(id) }
     }
 
     func exportHighlightsMarkdown(bookTitle: String, bookId: UUID) -> String {
@@ -191,21 +201,27 @@ class BookStore: ObservableObject {
         return md
     }
 
-    private func saveHighlights(_ highlights: [BookHighlight], bookId: UUID) {
+    // MARK: - Persistence (internal, used by SyncService for merges)
+
+    func persistHighlights(_ highlights: [BookHighlight], bookId: UUID) {
         objectWillChange.send()
         if let data = try? JSONEncoder().encode(highlights) {
             defaults.set(data, forKey: "highlights_\(bookId.uuidString)")
         }
     }
 
+    func persistBooks() {
+        guard let data = try? JSONEncoder().encode(books) else { return }
+        try? data.write(to: metadataFileURL, options: .atomic)
+    }
+
+    private func saveHighlights(_ highlights: [BookHighlight], bookId: UUID) {
+        persistHighlights(highlights, bookId: bookId)
+    }
+
     private func loadBooks() {
         guard let data = try? Data(contentsOf: metadataFileURL),
               let decoded = try? JSONDecoder().decode([BookMetadata].self, from: data) else { return }
         books = decoded
-    }
-
-    private func saveBooks() {
-        guard let data = try? JSONEncoder().encode(books) else { return }
-        try? data.write(to: metadataFileURL, options: .atomic)
     }
 }
