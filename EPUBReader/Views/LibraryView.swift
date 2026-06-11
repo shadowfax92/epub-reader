@@ -97,8 +97,14 @@ struct LibraryView: View {
         }
         .listStyle(.plain)
         .navigationDestination(for: BookMetadata.self) { book in
-            ReaderView(book: book)
-                .environmentObject(bookStore)
+            switch book.format {
+            case .epub:
+                ReaderView(book: book)
+                    .environmentObject(bookStore)
+            case .pdf:
+                PDFReaderView(book: book)
+                    .environmentObject(bookStore)
+            }
         }
     }
 

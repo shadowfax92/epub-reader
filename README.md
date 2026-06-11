@@ -14,7 +14,8 @@ A simple iOS app that reads EPUB books out loud using [ElevenLabs](https://eleve
 
 - 🎧 **AI-powered narration** — natural voices from ElevenLabs, not robotic TTS
 - 🔦 **Live word highlighting** — see exactly what's being read, word by word
-- 📚 **Import any EPUB** — open files from iCloud Drive, Files, email, anywhere
+- 📚 **Import any EPUB or PDF** — open files from iCloud Drive, Files, email, anywhere
+- 📄 **PDF narration** — original pages rendered as-is, with the spoken word highlighted on the page
 - 🎨 **Themes** — light, dark, sepia, or match your system
 - ⏩ **Speed control** — 0.8x to 2.5x playback speed
 - 🔊 **Background audio** — keep listening with the screen off

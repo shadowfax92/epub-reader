@@ -26,6 +26,7 @@
 		7392B1C6AB9AEF90EC84139F /* PDFSelectionMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0714E4FCCB887B557F03927C /* PDFSelectionMapper.swift */; };
 		74C6F1569226488853E9B03C /* EPUBParserService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0585283C7FCD0CC23D4B72A /* EPUBParserService.swift */; };
 		79B64FCDF95719C1984D1326 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = 69C17F8441D9B4AA09CCB71E /* ReadiumShared */; };
+		88488C772E9BFCED39FFBD81 /* PDFReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3626C54B7DE888B4A393E10 /* PDFReaderView.swift */; };
 		88779632FAC86C11983312F8 /* EPUBReaderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DC7AA80E68BCE5CDAC91BF /* EPUBReaderApp.swift */; };
 		90845789391141653A007272 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = 8FEF355C3BCDD3AAB280F84E /* ReadiumNavigator */; };
 		9E847438A5BA225FBB400BE4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA43EAC7B6FD78876267B56 /* SettingsView.swift */; };
@@ -80,6 +81,7 @@
 		D757BBA859CACB283ECC9533 /* ReadiumReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumReaderView.swift; sourceTree = "<group>"; };
 		E0556BB93AF7485712E5946E /* BookFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFormatTests.swift; sourceTree = "<group>"; };
 		E222C91BB3C6BB4728DE80DD /* BookStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookStore.swift; sourceTree = "<group>"; };
+		E3626C54B7DE888B4A393E10 /* PDFReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderView.swift; sourceTree = "<group>"; };
 		F2E1E73BED909ECCB38442DF /* PDFTextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFTextExtractor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -158,6 +160,7 @@
 				783E9DE95ACD9E094ECA7719 /* HighlightsView.swift */,
 				5D79AC2E138A4BEAE46E5BE4 /* LibraryView.swift */,
 				C91940FE4D946B4B80D4F936 /* PDFKitReaderView.swift */,
+				E3626C54B7DE888B4A393E10 /* PDFReaderView.swift */,
 				48F9D8B44429917603FE694B /* PlaybackControlsView.swift */,
 				9A2D4A313666A4D493174F12 /* ReaderView.swift */,
 				D757BBA859CACB283ECC9533 /* ReadiumReaderView.swift */,
@@ -299,6 +302,7 @@
 				3C35535915C1C4599239306C /* OpenAITTSService.swift in Sources */,
 				3CE9CA4221D44B52C1C7B8E8 /* PDFKitReaderView.swift in Sources */,
 				0D43F9A2AE78DEE0F352D0DC /* PDFParserService.swift in Sources */,
+				88488C772E9BFCED39FFBD81 /* PDFReaderView.swift in Sources */,
 				7392B1C6AB9AEF90EC84139F /* PDFSelectionMapper.swift in Sources */,
 				A560D2859DA42BFA333E9982 /* PDFTextExtractor.swift in Sources */,
 				D3E4E0B4FF09AEB18FF7CF9D /* PlaybackControlsView.swift in Sources */,
