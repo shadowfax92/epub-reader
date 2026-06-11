@@ -37,6 +37,18 @@ final class EPUBImportTests: XCTestCase {
         XCTAssertTrue(EPUBImport.isExplodedEPUBDirectory(dir))
     }
 
+    func testUndownloadedContainerXMLPlaceholderIsValid() throws {
+        let dir = try EPUBFixtures.directory(files: ["META-INF/.container.xml.icloud": "placeholder"])
+        defer { EPUBFixtures.cleanup(dir) }
+        XCTAssertTrue(EPUBImport.isExplodedEPUBDirectory(dir))
+    }
+
+    func testUndownloadedMimetypePlaceholderIsValid() throws {
+        let dir = try EPUBFixtures.directory(files: [".mimetype.icloud": "placeholder"])
+        defer { EPUBFixtures.cleanup(dir) }
+        XCTAssertTrue(EPUBImport.isExplodedEPUBDirectory(dir))
+    }
+
     // MARK: - isExplodedEPUBDirectory: invalid cases
 
     func testNonEPUBDirectoryIsInvalid() throws {

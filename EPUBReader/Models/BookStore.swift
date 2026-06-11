@@ -124,7 +124,11 @@ class BookStore: ObservableObject {
             .appendingPathComponent("import-\(UUID().uuidString)", isDirectory: true)
         let stagedURL = stagingDir.appendingPathComponent(fileName)
         try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: stagingDir) }
+        defer {
+            // Detached: on the failure path this deletes a fully staged book,
+            // which shouldn't hitch the main actor.
+            Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: stagingDir) }
+        }
 
         try await Self.coordinatedCopy(from: sourceURL, to: stagedURL)
 
@@ -133,9 +137,10 @@ class BookStore: ObservableObject {
 
         let destURL = booksDirectoryURL.appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: destURL.path) {
-            try FileManager.default.removeItem(at: destURL)
+            _ = try FileManager.default.replaceItemAt(destURL, withItemAt: stagedURL)
+        } else {
+            try FileManager.default.moveItem(at: stagedURL, to: destURL)
         }
-        try FileManager.default.moveItem(at: stagedURL, to: destURL)
 
         let book = BookMetadata(
             id: UUID(),
@@ -150,22 +155,33 @@ class BookStore: ObservableObject {
         return book
     }
 
-    /// Coordinated read so iCloud-backed picker items (files or whole folders)
-    /// are materialized by the system before we copy them into the sandbox.
-    /// Nonisolated on purpose: materialization can download for minutes and
-    /// must not block the main actor.
+    /// Coordinated read before copying picker items into the sandbox. The
+    /// system materializes the coordinated item itself; folder children are
+    /// best-effort (an evicted child fails the copy with a clear error and the
+    /// user can retry after downloading in Files). Runs on a GCD queue because
+    /// coordination blocks its thread — possibly for a long download — which
+    /// neither the main actor nor the cooperative pool should absorb.
     nonisolated static func coordinatedCopy(from source: URL, to destination: URL) async throws {
-        var coordinatorError: NSError?
-        var copyError: Error?
-        NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinatorError) { url in
-            do {
-                try FileManager.default.copyItem(at: url, to: destination)
-            } catch {
-                copyError = error
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var coordinatorError: NSError?
+                var copyError: Error?
+                NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinatorError) { url in
+                    do {
+                        try FileManager.default.copyItem(at: url, to: destination)
+                    } catch {
+                        copyError = error
+                    }
+                }
+                if let coordinatorError {
+                    continuation.resume(throwing: coordinatorError)
+                } else if let copyError {
+                    continuation.resume(throwing: copyError)
+                } else {
+                    continuation.resume()
+                }
             }
         }
-        if let coordinatorError { throw coordinatorError }
-        if let copyError { throw copyError }
     }
 
     func removeBook(_ book: BookMetadata) {

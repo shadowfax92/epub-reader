@@ -11,6 +11,8 @@ enum EPUBImport {
     /// True when `url` is a directory shaped like an exploded EPUB:
     /// `META-INF/container.xml` present, or a `mimetype` file declaring
     /// `application/epub+zip` (OCF spec; matches Readium's sniffer).
+    /// Tolerates undownloaded iCloud entries (`.name.icloud` placeholders) so
+    /// evicted-but-valid books aren't rejected before the coordinated copy.
     static func isExplodedEPUBDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         guard
@@ -20,15 +22,27 @@ enum EPUBImport {
             return false
         }
 
-        let containerXML = url.appendingPathComponent("META-INF/container.xml")
-        if FileManager.default.fileExists(atPath: containerXML.path) {
+        if entryExists(in: url, at: "META-INF/container.xml") {
             return true
         }
 
         let mimetype = url.appendingPathComponent("mimetype")
-        guard let contents = try? String(contentsOf: mimetype, encoding: .utf8) else {
-            return false
+        if let contents = try? String(contentsOf: mimetype, encoding: .utf8) {
+            return contents.trimmingCharacters(in: .whitespacesAndNewlines) == "application/epub+zip"
         }
-        return contents.trimmingCharacters(in: .whitespacesAndNewlines) == "application/epub+zip"
+        // Placeholder-only mimetype: content unreadable until download, but a
+        // folder carrying an OCF `mimetype` entry is an EPUB for our purposes;
+        // Readium remains the final arbiter after the copy.
+        return entryExists(in: url, at: "mimetype")
+    }
+
+    private static func entryExists(in dir: URL, at relativePath: String) -> Bool {
+        let real = dir.appendingPathComponent(relativePath)
+        if FileManager.default.fileExists(atPath: real.path) {
+            return true
+        }
+        let placeholder = real.deletingLastPathComponent()
+            .appendingPathComponent(".\(real.lastPathComponent).icloud")
+        return FileManager.default.fileExists(atPath: placeholder.path)
     }
 }
