@@ -18,12 +18,21 @@ enum EPUBFixtures {
         return dir
     }
 
-    /// Passes structural validation (container.xml present) but fails real parsing.
-    static func brokenOPFEPUB(named name: String = "Broken.epub") throws -> URL {
+    /// Passes structural validation (container.xml present) but fails real
+    /// parsing: the container declares no rootfile, which Readium rejects.
+    static func unparseableEPUB(named name: String = "Broken.epub") throws -> URL {
         let dir = try uniqueRoot().appendingPathComponent(name, isDirectory: true)
         try write("application/epub+zip", to: dir, at: "mimetype")
-        try write(containerXML, to: dir, at: "META-INF/container.xml")
-        try write("<this is not an opf>", to: dir, at: "OEBPS/package.opf")
+        try write(
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles/>
+            </container>
+            """,
+            to: dir,
+            at: "META-INF/container.xml"
+        )
         return dir
     }
 

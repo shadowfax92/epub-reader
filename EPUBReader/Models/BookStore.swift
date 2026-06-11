@@ -108,28 +108,56 @@ class BookStore: ObservableObject {
     }
 
     func importBook(from sourceURL: URL) async throws -> BookMetadata {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory),
+           isDirectory.boolValue,
+           !EPUBImport.isExplodedEPUBDirectory(sourceURL) {
+            throw EPUBError.notAnEPUB
+        }
+
         let fileName = sourceURL.lastPathComponent
         let destURL = booksDirectoryURL.appendingPathComponent(fileName)
 
         if FileManager.default.fileExists(atPath: destURL.path) {
             try FileManager.default.removeItem(at: destURL)
         }
-        try FileManager.default.copyItem(at: sourceURL, to: destURL)
+        try Self.coordinatedCopy(from: sourceURL, to: destURL)
 
-        let publication = try await ReadiumService.shared.openPublication(at: destURL)
-        let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
+        do {
+            let publication = try await ReadiumService.shared.openPublication(at: destURL)
+            let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
 
-        let book = BookMetadata(
-            id: UUID(),
-            title: parsed.title ?? fileName.replacingOccurrences(of: ".epub", with: ""),
-            author: parsed.author ?? "Unknown Author",
-            fileName: fileName,
-            dateAdded: Date()
-        )
+            let book = BookMetadata(
+                id: UUID(),
+                title: parsed.title ?? fileName.replacingOccurrences(of: ".epub", with: ""),
+                author: parsed.author ?? "Unknown Author",
+                fileName: fileName,
+                dateAdded: Date()
+            )
 
-        books.insert(book, at: 0)
-        saveBooks()
-        return book
+            books.insert(book, at: 0)
+            saveBooks()
+            return book
+        } catch {
+            try? FileManager.default.removeItem(at: destURL)
+            throw error
+        }
+    }
+
+    /// Coordinated read so iCloud-backed picker items (files or whole folders)
+    /// are materialized by the system before we copy them into the sandbox.
+    private static func coordinatedCopy(from source: URL, to destination: URL) throws {
+        var coordinatorError: NSError?
+        var copyError: Error?
+        NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinatorError) { url in
+            do {
+                try FileManager.default.copyItem(at: url, to: destination)
+            } catch {
+                copyError = error
+            }
+        }
+        if let coordinatorError { throw coordinatorError }
+        if let copyError { throw copyError }
     }
 
     func removeBook(_ book: BookMetadata) {
