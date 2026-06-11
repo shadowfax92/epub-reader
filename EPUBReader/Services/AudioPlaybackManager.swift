@@ -34,12 +34,6 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
     private var onPositionUpdate: ((ReadingPosition) -> Void)?
 
-    struct WordTiming {
-        let globalWordIndex: Int
-        let startTime: Double
-        let endTime: Double
-    }
-
     private struct CachedAudio {
         let audioData: Data
         let timings: [WordTiming]
@@ -322,42 +316,6 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         startSyncTimer()
     }
 
-    private func mapCharacterTimingsToWords(alignment: ElevenLabsService.TTSAlignment?, words: [BookWord]) -> [WordTiming] {
-        guard let alignment = alignment,
-              !alignment.character_start_times_seconds.isEmpty else {
-            return []
-        }
-
-        let charCount = alignment.character_start_times_seconds.count
-        var timings: [WordTiming] = []
-        var charIndex = 0
-
-        for word in words {
-            let wordLength = word.text.count
-            guard charIndex < charCount else { break }
-
-            let startTime = alignment.character_start_times_seconds[charIndex]
-            let endCharIndex = min(charIndex + wordLength - 1, charCount - 1)
-            let endTime = alignment.character_end_times_seconds[min(endCharIndex, alignment.character_end_times_seconds.count - 1)]
-
-            timings.append(WordTiming(
-                globalWordIndex: word.id,
-                startTime: startTime,
-                endTime: endTime
-            ))
-
-            charIndex += wordLength + 1
-            while charIndex < charCount && charIndex > 0 {
-                let chars = alignment.characters
-                if charIndex >= chars.count { break }
-                if chars[charIndex - 1] == " " { break }
-                charIndex += 1
-            }
-        }
-
-        return timings
-    }
-
     private func startSyncTimer() {
         stopSyncTimer()
         syncTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
@@ -376,12 +334,10 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         guard let player = audioPlayer, player.isPlaying else { return }
         let currentTime = player.currentTime
 
-        if let timing = wordTimings.last(where: { $0.startTime <= currentTime }) {
-            if timing.globalWordIndex != currentGlobalWordIndex {
-                currentGlobalWordIndex = timing.globalWordIndex
-            }
-        } else if let first = wordTimings.first {
-            currentGlobalWordIndex = first.globalWordIndex
+        let index = TTSTimingMapper.currentWordIndex(timings: wordTimings, at: currentTime)
+            ?? wordTimings.first?.globalWordIndex
+        if let index, index != currentGlobalWordIndex {
+            currentGlobalWordIndex = index
         }
     }
 
@@ -490,8 +446,13 @@ class AudioPlaybackManager: NSObject, ObservableObject {
                 previousText: paragraphText(at: paragraphIndex - 1),
                 nextText: paragraphText(at: paragraphIndex + 1)
             )
-            let timings = mapCharacterTimingsToWords(
-                alignment: response.normalized_alignment ?? response.alignment,
+            // Raw alignment's characters match the input text exactly;
+            // normalized_alignment expands numbers/abbreviations and drifts.
+            let alignment = response.alignment ?? response.normalized_alignment
+            let timings = TTSTimingMapper.mapAlignment(
+                characters: alignment?.characters ?? [],
+                startTimes: alignment?.character_start_times_seconds ?? [],
+                endTimes: alignment?.character_end_times_seconds ?? [],
                 words: words
             )
             guard let audioData = Data(base64Encoded: response.audio_base64) else {
@@ -511,32 +472,8 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     }
 
     private func estimateWordTimings(words: [BookWord], audioData: Data) -> [WordTiming] {
-        guard !words.isEmpty else { return [] }
-
         guard let tempPlayer = try? AVAudioPlayer(data: audioData) else { return [] }
-        let duration = tempPlayer.duration
-
-        let totalCharsWithSpaces = words.reduce(0) { $0 + $1.text.count } + max(0, words.count - 1)
-        guard totalCharsWithSpaces > 0, duration > 0 else { return [] }
-
-        let timePerChar = duration / Double(totalCharsWithSpaces)
-        var timings: [WordTiming] = []
-        var currentTime: Double = 0
-
-        for (i, word) in words.enumerated() {
-            let wordDuration = Double(word.text.count) * timePerChar
-            timings.append(WordTiming(
-                globalWordIndex: word.id,
-                startTime: currentTime,
-                endTime: currentTime + wordDuration
-            ))
-            currentTime += wordDuration
-            if i < words.count - 1 {
-                currentTime += timePerChar
-            }
-        }
-
-        return timings
+        return TTSTimingMapper.proportionalTimings(words: words, duration: tempPlayer.duration)
     }
 
     private func saveCurrentPosition() {
