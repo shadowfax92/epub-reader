@@ -70,9 +70,6 @@ struct ReaderView: View {
         .onChange(of: playbackManager.isPlaying) { _, playing in
             if playing { scheduleHideControls() }
         }
-        .onChange(of: playbackManager.currentGlobalWordIndex) { _, _ in
-            updateWordHighlight()
-        }
         .onChange(of: bookStore.readerTheme) { _, newTheme in
             applyThemeToNavigator(newTheme)
         }
@@ -446,7 +443,13 @@ struct ReaderView: View {
 
             navigator = nav
             isLoading = false
+            playbackManager.onWordChange = { [self] _, _ in
+                updateWordHighlight()
+            }
             applyHighlightDecorations()
+            if bookStore.getReadingPosition(bookId: book.id) != nil {
+                updateWordHighlight()
+            }
         } catch {
             loadError = error.localizedDescription
             isLoading = false
@@ -579,10 +582,6 @@ struct ReaderView: View {
             locator: locator,
             style: .highlight(tint: .systemBlue, isActive: true)
         )
-
-        #if DEBUG
-        print("[TTS-HL] word='\(ctx.highlight)' para=\(paraId) href=\(paragraph.resourceHref) before=\(ctx.before?.count ?? 0)ch after=\(ctx.after?.count ?? 0)ch")
-        #endif
 
         nav.apply(decorations: [decoration], in: "tts")
 

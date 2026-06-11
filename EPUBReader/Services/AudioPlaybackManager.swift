@@ -34,6 +34,10 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
     private var onPositionUpdate: ((ReadingPosition) -> Void)?
 
+    /// Fires (globalWordIndex, paragraphId) straight from the sync timer so the
+    /// decoration applies without waiting on a SwiftUI onChange view-update hop.
+    var onWordChange: ((Int, Int) -> Void)?
+
     private struct CachedAudio {
         let audioData: Data
         let timings: [WordTiming]
@@ -307,6 +311,9 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
         if let firstWord = allParagraphs[paragraphIndex].words.first {
             currentGlobalWordIndex = startFromWordGlobal > 0 ? startFromWordGlobal : firstWord.id
+            // Unconditional fire: resuming on the same word produces no
+            // index change, but the decoration still needs an initial draw.
+            onWordChange?(currentGlobalWordIndex, paragraphId)
         }
 
         audioPlayer?.play()
@@ -316,11 +323,18 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
     private func startSyncTimer() {
         stopSyncTimer()
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
+        // .common keeps ticks flowing while the WKWebView scroll view is
+        // tracking — .default-mode timers pause and the highlight freezes
+        // mid-scroll. assumeIsolated (valid: main-run-loop timers fire on the
+        // main thread) avoids allocating a Task per tick.
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
                 self?.updateHighlight()
             }
         }
+        timer.tolerance = 0.005
+        RunLoop.main.add(timer, forMode: .common)
+        syncTimer = timer
     }
 
     private func stopSyncTimer() {
@@ -336,6 +350,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             ?? wordTimings.first?.globalWordIndex
         if let index, index != currentGlobalWordIndex {
             currentGlobalWordIndex = index
+            onWordChange?(index, currentParagraphId)
         }
     }
 
