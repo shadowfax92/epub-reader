@@ -7,6 +7,7 @@ struct LibraryView: View {
     @State private var showSettings = false
     @State private var importError: String?
     @State private var showError = false
+    @State private var isDropTargeted = false
 
     var body: some View {
         Group {
@@ -14,6 +15,14 @@ struct LibraryView: View {
                 emptyState
             } else {
                 bookList
+            }
+        }
+        .onDrop(of: BookDropImport.acceptedTypes, isTargeted: $isDropTargeted) { providers in
+            importDroppedItems(providers)
+        }
+        .overlay {
+            if isDropTargeted {
+                dropTargetOverlay
             }
         }
         .navigationTitle("Library")
@@ -32,7 +41,7 @@ struct LibraryView: View {
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: EPUBImport.allowedContentTypes + [.pdf],
-            allowsMultipleSelection: false
+            allowsMultipleSelection: true
         ) { result in
             handleFileImport(result)
         }
@@ -108,25 +117,76 @@ struct LibraryView: View {
         }
     }
 
+    private var dropTargetOverlay: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.tint, style: StrokeStyle(lineWidth: 2, dash: [8]))
+                .padding(8)
+            Label("Drop books to import", systemImage: "arrow.down.doc")
+                .font(.headline)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(.regularMaterial, in: Capsule())
+        }
+        .allowsHitTesting(false)
+    }
+
     private func handleFileImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            guard let url = urls.first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
-
             Task {
-                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                do {
-                    let _ = try await bookStore.importBook(from: url)
-                } catch {
-                    importError = error.localizedDescription
-                    showError = true
+                var failures: [String] = []
+                for url in urls {
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                    do {
+                        _ = try await bookStore.importBook(from: url)
+                    } catch {
+                        failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                    }
                 }
+                presentFailures(failures)
             }
 
         case .failure(let error):
             importError = error.localizedDescription
             showError = true
         }
+    }
+
+    private func importDroppedItems(_ providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+        Task {
+            var failures: [String] = []
+            for provider in providers {
+                do {
+                    let item = try await BookDropImport.resolveItem(from: provider)
+                    defer {
+                        if item.needsSecurityScopeRelease {
+                            item.url.stopAccessingSecurityScopedResource()
+                        }
+                        if let tmp = item.ownedTemporaryDirectory {
+                            try? FileManager.default.removeItem(at: tmp)
+                        }
+                    }
+                    do {
+                        _ = try await bookStore.importBook(from: item.url)
+                    } catch {
+                        failures.append("\(item.url.lastPathComponent): \(error.localizedDescription)")
+                    }
+                } catch {
+                    // DropError messages already name the item
+                    failures.append(error.localizedDescription)
+                }
+            }
+            presentFailures(failures)
+        }
+        return true
+    }
+
+    private func presentFailures(_ failures: [String]) {
+        guard !failures.isEmpty else { return }
+        importError = failures.joined(separator: "\n")
+        showError = true
     }
 }
