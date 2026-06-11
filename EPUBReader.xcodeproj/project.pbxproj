@@ -16,6 +16,7 @@
 		1F95B870B78E615AB3535D4D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4D3784CA2978ED65D6818863 /* Assets.xcassets */; };
 		3C196A2C87E589FBD705EF33 /* TTSProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03006F291EE34A5E4B8A23DC /* TTSProvider.swift */; };
 		3C35535915C1C4599239306C /* OpenAITTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 916F58B595EB1A7472C75897 /* OpenAITTSService.swift */; };
+		3CE9CA4221D44B52C1C7B8E8 /* PDFKitReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91940FE4D946B4B80D4F936 /* PDFKitReaderView.swift */; };
 		490AD5683F1E8117210ADA16 /* ReadiumReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D757BBA859CACB283ECC9533 /* ReadiumReaderView.swift */; };
 		500D362D95F37E0D438AAFD9 /* PDFParserServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CB11BA781F1E8E3AFE7A27 /* PDFParserServiceTests.swift */; };
 		50C1BDE27582540A0D8CA267 /* AudioPlaybackManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 803C391E9257F2B72D408495 /* AudioPlaybackManager.swift */; };
@@ -74,6 +75,7 @@
 		ADB0D8D9E48BD40246619D80 /* ReadiumService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumService.swift; sourceTree = "<group>"; };
 		B4CB11BA781F1E8E3AFE7A27 /* PDFParserServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFParserServiceTests.swift; sourceTree = "<group>"; };
 		C691393151F57E0CEC34D659 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C91940FE4D946B4B80D4F936 /* PDFKitReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFKitReaderView.swift; sourceTree = "<group>"; };
 		CB33013E74A9751F0F5366F6 /* PDFTestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFTestFixtures.swift; sourceTree = "<group>"; };
 		D757BBA859CACB283ECC9533 /* ReadiumReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumReaderView.swift; sourceTree = "<group>"; };
 		E0556BB93AF7485712E5946E /* BookFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookFormatTests.swift; sourceTree = "<group>"; };
@@ -155,6 +157,7 @@
 			children = (
 				783E9DE95ACD9E094ECA7719 /* HighlightsView.swift */,
 				5D79AC2E138A4BEAE46E5BE4 /* LibraryView.swift */,
+				C91940FE4D946B4B80D4F936 /* PDFKitReaderView.swift */,
 				48F9D8B44429917603FE694B /* PlaybackControlsView.swift */,
 				9A2D4A313666A4D493174F12 /* ReaderView.swift */,
 				D757BBA859CACB283ECC9533 /* ReadiumReaderView.swift */,
@@ -294,6 +297,7 @@
 				018DA436B675890E863DBF2E /* HighlightsView.swift in Sources */,
 				F79B88E47889C320F80555FD /* LibraryView.swift in Sources */,
 				3C35535915C1C4599239306C /* OpenAITTSService.swift in Sources */,
+				3CE9CA4221D44B52C1C7B8E8 /* PDFKitReaderView.swift in Sources */,
 				0D43F9A2AE78DEE0F352D0DC /* PDFParserService.swift in Sources */,
 				7392B1C6AB9AEF90EC84139F /* PDFSelectionMapper.swift in Sources */,
 				A560D2859DA42BFA333E9982 /* PDFTextExtractor.swift in Sources */,
