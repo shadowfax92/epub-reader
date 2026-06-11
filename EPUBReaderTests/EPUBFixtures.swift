@@ -27,6 +27,16 @@ enum EPUBFixtures {
         return dir
     }
 
+    /// Arbitrary directory with the given relative-path → content files.
+    static func directory(named name: String = "Dir", files: [String: String]) throws -> URL {
+        let dir = try uniqueRoot().appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (path, content) in files {
+            try write(content, to: dir, at: path)
+        }
+        return dir
+    }
+
     /// Removes the unique root that contains the fixture.
     static func cleanup(_ url: URL) {
         try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
