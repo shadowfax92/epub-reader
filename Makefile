@@ -10,18 +10,27 @@ CONFIG     := Release
 DERIVED    := DerivedData
 APP_BUNDLE := $(DERIVED)/Build/Products/$(CONFIG)-iphoneos/$(APP).app
 
-ARCH     ?= $(shell uname -m)
+# hw.optional.arm64 stays 1 under Rosetta, where uname -m lies (x86_64)
+IS_ARM64 ?= $(shell sysctl -n hw.optional.arm64 2>/dev/null)
 XCODEGEN ?= xcodegen
 
 INSTALL_DIR ?= /Applications
 
+REQUIRE_XCODEGEN = @command -v $(XCODEGEN) >/dev/null 2>&1 || { echo "error: xcodegen not found — brew install xcodegen"; exit 1; }
+
 .PHONY: generate build-mac install-mac clean check-arch
 
 generate:
-	@command -v $(XCODEGEN) >/dev/null 2>&1 || { echo "error: xcodegen not found — brew install xcodegen"; exit 1; }
+	$(REQUIRE_XCODEGEN)
 	$(XCODEGEN) generate
 
-build-mac: check-arch generate
+# regen only when the spec changed, so a signing team set in Xcode (stored in
+# the pbxproj, wiped by xcodegen) survives make install-mac
+$(PROJECT)/project.pbxproj: project.yml
+	$(REQUIRE_XCODEGEN)
+	$(XCODEGEN) generate
+
+build-mac: check-arch $(PROJECT)/project.pbxproj
 	@command -v xcodebuild >/dev/null 2>&1 || { echo "error: xcodebuild not found — install Xcode"; exit 1; }
 	xcodebuild build -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) \
 		-destination 'generic/platform=iOS' -derivedDataPath $(DERIVED) CODE_SIGNING_ALLOWED=NO
@@ -31,7 +40,7 @@ install-mac: build-mac
 	bash scripts/install-mac.sh "$(APP_BUNDLE)" "$(INSTALL_DIR)"
 
 check-arch:
-	@[ "$(ARCH)" = "arm64" ] || { echo "error: Mac install needs Apple Silicon (iOS apps only run on arm64 Macs); detected $(ARCH)"; exit 1; }
+	@[ "$(IS_ARM64)" = "1" ] || { echo "error: Mac install needs Apple Silicon (iOS apps only run on arm64 Macs)"; exit 1; }
 
 clean:
 	rm -rf $(DERIVED)

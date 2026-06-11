@@ -13,6 +13,7 @@ APP_BUNDLE="${1:?usage: install-mac.sh <built .app> [install dir]}"
 INSTALL_DIR="${2:-/Applications}"
 [ -d "$APP_BUNDLE" ] || die "app bundle not found: $APP_BUNDLE (run 'make build-mac' first)"
 if [ ! -w "$INSTALL_DIR" ]; then
+  echo "warning: $INSTALL_DIR is not writable — installing to $HOME/Applications instead" >&2
   INSTALL_DIR="$HOME/Applications"
   mkdir -p "$INSTALL_DIR"
 fi
@@ -47,15 +48,16 @@ for p in ~/Library/Developer/Xcode/UserData/"Provisioning Profiles"/*.mobileprov
     "$team.$BUNDLE_ID"|"$team.*") ;;
     *) continue ;;
   esac
-  for i in 0 1 2 3 4; do
-    cert_sha=$(plutil -extract DeveloperCertificates.$i raw -o - "$DECODED" 2>/dev/null \
-      | base64 -d 2>/dev/null | shasum -a 1 | awk '{print toupper($1)}') || break
+  i=0
+  while cert_sha=$(plutil -extract DeveloperCertificates.$i raw -o - "$DECODED" 2>/dev/null \
+      | base64 -d 2>/dev/null | shasum -a 1 | awk '{print toupper($1)}'); do
     for id in $IDENTITIES; do
       if [ "$cert_sha" = "$id" ]; then
         PROFILE="$p" IDENTITY="$id" TEAM="$team"
         break 3
       fi
     done
+    i=$((i+1))
   done
 done
 [ -n "$PROFILE" ] || die "no provisioning profile covers this Mac (UDID $UDID) for $BUNDLE_ID.
@@ -81,13 +83,13 @@ cat > "$STAGE/entitlements.plist" <<EOF
 </plist>
 EOF
 codesign --force --entitlements "$STAGE/entitlements.plist" -s "$IDENTITY" "$STAGE/$APP_NAME.app"
+codesign --verify --deep --strict "$STAGE/$APP_NAME.app"
 
 TARGET="$INSTALL_DIR/$APP_NAME.app"
 rm -rf "$TARGET"
 mkdir -p "$TARGET/Wrapper"
 ditto "$STAGE/$APP_NAME.app" "$TARGET/Wrapper/$APP_NAME.app"
 ln -s "Wrapper/$APP_NAME.app" "$TARGET/WrappedBundle"
-codesign --verify --deep --strict "$TARGET/Wrapper/$APP_NAME.app"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$TARGET"
 
 echo "Installed: $TARGET"
