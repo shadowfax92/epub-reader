@@ -1,5 +1,8 @@
 import SwiftUI
 
+// Generic types can't hold static stored properties, so the options live at file scope.
+private let playbackSpeedOptions: [Double] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.5]
+
 /// Shared playback cluster (loading/error, speed pills, transport row, progress) used by both
 /// the EPUB and PDF readers. Reader-specific rows slot in via the two accessory builders:
 /// `topAccessory` renders above the speed pills, `actionAccessory` between pills and transport.
@@ -11,10 +14,6 @@ struct PlaybackControlsView<TopAccessory: View, ActionAccessory: View>: View {
     let onPlayPause: () -> Void
     private let topAccessory: TopAccessory
     private let actionAccessory: ActionAccessory
-
-    private static var speedOptions: [Double] {
-        [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.5]
-    }
 
     init(
         playbackManager: AudioPlaybackManager,
@@ -53,7 +52,7 @@ struct PlaybackControlsView<TopAccessory: View, ActionAccessory: View>: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(Self.speedOptions, id: \.self) { speed in
+                    ForEach(playbackSpeedOptions, id: \.self) { speed in
                         Button {
                             currentSpeed = speed
                             playbackManager.speed = speed

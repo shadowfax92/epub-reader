@@ -79,9 +79,14 @@ struct PDFKitReaderView: UIViewRepresentable {
         proxy.pdfView = pdfView
 
         if let initialPageIndex, let page = document.page(at: initialPageIndex) {
+            // Layout fires PDFViewPageChanged for page 0 before the restore lands;
+            // suppress persistence until then so the saved page isn't clobbered.
+            context.coordinator.initialNavigationPending = true
+            let coordinator = context.coordinator
             // PDFView ignores go(to:) until it has laid out; defer one runloop turn.
             DispatchQueue.main.async {
                 pdfView.go(to: page)
+                coordinator.initialNavigationPending = false
             }
         }
         return pdfView
@@ -109,8 +114,9 @@ struct PDFKitReaderView: UIViewRepresentable {
         var onTap: () -> Void
         var onSelectionChanged: (Bool) -> Void
         var onVisiblePageChanged: (Int) -> Void
+        var initialNavigationPending = false
 
-        private var currentAnnotation: PDFAnnotation?
+        private var currentAnnotations: [PDFAnnotation] = []
         private var lastHighlight: PDFWordHighlight?
         private var lastNavigatedPageIndex: Int?
         private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
@@ -151,6 +157,7 @@ struct PDFKitReaderView: UIViewRepresentable {
                 let pdfView = notification.object as? PDFView
                 Task { @MainActor in
                     guard let self, let pdfView,
+                          !self.initialNavigationPending,
                           let document = pdfView.document,
                           let page = pdfView.currentPage else { return }
                     self.onVisiblePageChanged(document.index(for: page))
@@ -169,33 +176,37 @@ struct PDFKitReaderView: UIViewRepresentable {
             true
         }
 
-        /// Swaps the single transient word annotation; navigates only when the word
+        /// Swaps the transient word annotations; navigates only when the word
         /// crosses onto a different page (mirrors the EPUB chapter-change rule).
+        /// One annotation per line fragment so hyphen-merged words spanning a line
+        /// break don't get a unioned box covering both full lines.
         func applyHighlight(_ highlight: PDFWordHighlight?, in pdfView: PDFView) {
             guard highlight != lastHighlight else { return }
             lastHighlight = highlight
 
-            if let annotation = currentAnnotation {
+            for annotation in currentAnnotations {
                 annotation.page?.removeAnnotation(annotation)
-                currentAnnotation = nil
             }
+            currentAnnotations = []
 
             guard let highlight,
                   let document = pdfView.document,
                   let page = document.page(at: highlight.pageIndex),
                   let selection = page.selection(for: highlight.range) else { return }
 
-            let bounds = selection.bounds(for: page)
-            guard !bounds.isNull, !bounds.isEmpty else { return }
-
-            let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
-            annotation.color = UIColor.systemBlue.withAlphaComponent(0.45)
-            page.addAnnotation(annotation)
-            currentAnnotation = annotation
+            for lineSelection in selection.selectionsByLine() {
+                let bounds = lineSelection.bounds(for: page)
+                guard !bounds.isNull, !bounds.isEmpty else { continue }
+                let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
+                annotation.color = UIColor.systemBlue.withAlphaComponent(0.45)
+                page.addAnnotation(annotation)
+                currentAnnotations.append(annotation)
+            }
 
             if lastNavigatedPageIndex != highlight.pageIndex {
                 lastNavigatedPageIndex = highlight.pageIndex
-                if pdfView.currentPage != page {
+                let bounds = selection.bounds(for: page)
+                if pdfView.currentPage != page, !bounds.isNull {
                     pdfView.go(to: bounds.insetBy(dx: -20, dy: -60), on: page)
                 }
             }

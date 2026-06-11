@@ -380,11 +380,14 @@ struct ReaderView: View {
             navigatorDelegate = delegate
 
             if let position = bookStore.getReadingPosition(bookId: book.id) {
-                playbackManager.currentGlobalWordIndex = position.globalWordIndex
                 let paraIdx = min(position.paragraphIndex, parsed.flatParagraphs.count - 1)
                 if paraIdx >= 0 {
                     let para = parsed.flatParagraphs[paraIdx]
-                    playbackManager.currentParagraphId = para.id
+                    playbackManager.restorePosition(
+                        paragraphArrayIndex: paraIdx,
+                        paragraphId: para.id,
+                        globalWordIndex: position.globalWordIndex
+                    )
                     lastScrolledResourceHref = para.resourceHref
                 }
             } else if let firstPara = parsed.flatParagraphs.first {

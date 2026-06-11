@@ -96,6 +96,15 @@ final class PDFTextExtractorTests: XCTestCase {
         XCTAssertEqual(PDFTextExtractor.paragraphs(from: "p1\r\n\r\np2").count, 2)
     }
 
+    func testUnicodeLineBreaksCountAsBreaks() {
+        XCTAssertEqual(PDFTextExtractor.paragraphs(from: "a\u{85}b").count, 1)
+        XCTAssertEqual(PDFTextExtractor.paragraphs(from: "p1\u{85}\u{85}p2").count, 2)
+        XCTAssertEqual(PDFTextExtractor.paragraphs(from: "p1\u{0C}\u{0C}p2").count, 2)
+        // Hyphen merge works across a NEL like a plain newline.
+        let tokens = allTokens(PDFTextExtractor.paragraphs(from: "exam-\u{85}ple"))
+        XCTAssertEqual(tokens.map(\.text), ["example"])
+    }
+
     // MARK: - Word caps
 
     func testLongRunSplitsAtSentenceBoundaryAfterSoftCap() {

@@ -68,7 +68,7 @@ enum PDFTextExtractor {
                 if c == 0x0D {
                     pendingBreaks += 1
                     if i + 1 < length, ns.character(at: i + 1) == 0x0A { i += 1 }
-                } else if c == 0x0A || c == 0x2028 || c == 0x2029 {
+                } else if isLineBreak(c) {
                     pendingBreaks += 1
                 }
                 i += 1
@@ -113,6 +113,11 @@ enum PDFTextExtractor {
     private static func isWhitespace(_ c: unichar) -> Bool {
         guard let scalar = Unicode.Scalar(c) else { return false } // surrogate halves are token content
         return CharacterSet.whitespacesAndNewlines.contains(scalar)
+    }
+
+    /// Matches CharacterSet.newlines minus \r (handled by the CRLF pairing branch).
+    private static func isLineBreak(_ c: unichar) -> Bool {
+        c == 0x0A || c == 0x0B || c == 0x0C || c == 0x85 || c == 0x2028 || c == 0x2029
     }
 
     private static func endsSentence(_ text: String) -> Bool {

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		018DA436B675890E863DBF2E /* HighlightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 783E9DE95ACD9E094ECA7719 /* HighlightsView.swift */; };
+		06E8C6F2408D92592C51BA88 /* AudioPlaybackManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97D72906C8A2B83210422692 /* AudioPlaybackManagerTests.swift */; };
 		0D43F9A2AE78DEE0F352D0DC /* PDFParserService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DA39136C5A6349C6C512BE /* PDFParserService.swift */; };
 		101709F650D9C74F15BA777D /* ElevenLabsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A42C62234F8995A951AEB8B /* ElevenLabsService.swift */; };
 		1734CB6A6E8C2FACE21629F8 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A2D4A313666A4D493174F12 /* ReaderView.swift */; };
@@ -68,6 +69,7 @@
 		803C391E9257F2B72D408495 /* AudioPlaybackManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlaybackManager.swift; sourceTree = "<group>"; };
 		916F58B595EB1A7472C75897 /* OpenAITTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAITTSService.swift; sourceTree = "<group>"; };
 		94A07AF8E6C5438C2EAC2D00 /* Book.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Book.swift; sourceTree = "<group>"; };
+		97D72906C8A2B83210422692 /* AudioPlaybackManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlaybackManagerTests.swift; sourceTree = "<group>"; };
 		98DA39136C5A6349C6C512BE /* PDFParserService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFParserService.swift; sourceTree = "<group>"; };
 		9A2D4A313666A4D493174F12 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
 		9A42C62234F8995A951AEB8B /* ElevenLabsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElevenLabsService.swift; sourceTree = "<group>"; };
@@ -103,6 +105,7 @@
 		13C23C24DACA4550140B11FF /* EPUBReaderTests */ = {
 			isa = PBXGroup;
 			children = (
+				97D72906C8A2B83210422692 /* AudioPlaybackManagerTests.swift */,
 				E0556BB93AF7485712E5946E /* BookFormatTests.swift */,
 				B4CB11BA781F1E8E3AFE7A27 /* PDFParserServiceTests.swift */,
 				1FAF09844CCE33D1599D029D /* PDFSelectionMapperTests.swift */,
@@ -319,6 +322,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				06E8C6F2408D92592C51BA88 /* AudioPlaybackManagerTests.swift in Sources */,
 				DEE17ADA60C157D7389F1A79 /* BookFormatTests.swift in Sources */,
 				500D362D95F37E0D438AAFD9 /* PDFParserServiceTests.swift in Sources */,
 				D1999F9325958185F4DB24CE /* PDFSelectionMapperTests.swift in Sources */,

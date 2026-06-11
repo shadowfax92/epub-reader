@@ -1,6 +1,12 @@
 import SwiftUI
 import PDFKit
 
+/// Moves a non-Sendable value across an isolation boundary the compiler can't prove safe;
+/// caller guarantees no concurrent access until the receiving side finishes.
+private struct UnsafeTransfer<T>: @unchecked Sendable {
+    let value: T
+}
+
 /// PDF counterpart of ReaderView: renders the original pages via PDFKit and drives the
 /// same AudioPlaybackManager, translating the spoken global word index into an on-page
 /// highlight through the parser's geometry side-table.
@@ -47,7 +53,7 @@ struct PDFReaderView: View {
                     onTap: { toggleControls() },
                     onSelectionChanged: { hasTextSelection = $0 },
                     onVisiblePageChanged: { pageIndex in
-                        UserDefaults.standard.set(pageIndex, forKey: "pdfPage_\(book.id.uuidString)")
+                        bookStore.savePDFPage(bookId: book.id, pageIndex: pageIndex)
                     }
                 )
                 .ignoresSafeArea()
@@ -257,7 +263,19 @@ struct PDFReaderView: View {
             return
         }
 
-        let parsed = PDFParserService.shared.parseBook(from: book, document: document)
+        if document.isLocked {
+            loadError = "This PDF is password-protected and can't be opened."
+            isLoading = false
+            return
+        }
+
+        // Parse off the main actor — page.string over a long document blocks for seconds.
+        // The view doesn't touch the document until the await returns, so the transfer is safe.
+        let boxedDocument = UnsafeTransfer(value: document)
+        let metadata = book
+        let parsed = await Task.detached(priority: .userInitiated) {
+            PDFParserService.shared.parseBook(from: metadata, document: boxedDocument.value)
+        }.value
         parsedPDF = parsed
 
         playbackManager.setBook(paragraphs: parsed.book.flatParagraphs)
@@ -265,15 +283,17 @@ struct PDFReaderView: View {
         reconfigurePlayback()
 
         if let position = bookStore.getReadingPosition(bookId: book.id) {
-            playbackManager.currentGlobalWordIndex = position.globalWordIndex
             let paraIdx = min(position.paragraphIndex, parsed.book.flatParagraphs.count - 1)
             if paraIdx >= 0 {
-                playbackManager.currentParagraphId = parsed.book.flatParagraphs[paraIdx].id
+                playbackManager.restorePosition(
+                    paragraphArrayIndex: paraIdx,
+                    paragraphId: parsed.book.flatParagraphs[paraIdx].id,
+                    globalWordIndex: position.globalWordIndex
+                )
             }
         }
 
-        let savedPage = UserDefaults.standard.object(forKey: "pdfPage_\(book.id.uuidString)") as? Int
-        initialPageIndex = savedPage
+        initialPageIndex = bookStore.getPDFPage(bookId: book.id)
             ?? parsed.wordLocations[safe: playbackManager.currentGlobalWordIndex]?.pageIndex
 
         pdfDocument = document

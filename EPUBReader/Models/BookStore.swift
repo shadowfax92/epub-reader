@@ -148,7 +148,17 @@ class BookStore: ObservableObject {
         try? FileManager.default.removeItem(at: book.fileURL)
         defaults.removeObject(forKey: "position_\(book.id.uuidString)")
         defaults.removeObject(forKey: "highlights_\(book.id.uuidString)")
+        defaults.removeObject(forKey: "pdfPage_\(book.id.uuidString)")
+        defaults.removeObject(forKey: "locator_\(book.id.uuidString)")
         saveBooks()
+    }
+
+    func savePDFPage(bookId: UUID, pageIndex: Int) {
+        defaults.set(pageIndex, forKey: "pdfPage_\(bookId.uuidString)")
+    }
+
+    func getPDFPage(bookId: UUID) -> Int? {
+        defaults.object(forKey: "pdfPage_\(bookId.uuidString)") as? Int
     }
 
     func saveReadingPosition(bookId: UUID, position: ReadingPosition) {

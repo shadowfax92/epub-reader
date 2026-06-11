@@ -20,9 +20,10 @@ struct ParsedPDFBook {
     let chapterPageIndices: [Int]
 }
 
-/// PDF counterpart of EPUBParserService: extracts import metadata via PDFKit.
-@MainActor
-final class PDFParserService {
+/// PDF counterpart of EPUBParserService: extracts import metadata and book content via PDFKit.
+/// Stateless and nonisolated so parsing can run off the main actor (PDFKit models are
+/// thread-safe for reading; only PDFView is main-thread-bound).
+final class PDFParserService: Sendable {
     static let shared = PDFParserService()
 
     func parseMetadata(from url: URL) -> PDFMetadataResult {
