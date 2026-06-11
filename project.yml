@@ -46,6 +46,9 @@ targets:
         product: ReadiumNavigator
       - package: swift-toolkit
         product: ReadiumAdapterGCDWebServer
+    scheme:
+      testTargets:
+        - EPUBReaderTests
 
   EPUBReaderTests:
     type: bundle.unit-test
