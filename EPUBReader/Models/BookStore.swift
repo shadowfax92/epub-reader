@@ -1,4 +1,5 @@
 import SwiftUI
+import PDFKit
 import ReadiumShared
 
 @MainActor
@@ -120,7 +121,15 @@ class BookStore: ObservableObject {
         let author: String?
         switch BookFormat(fileName: fileName) {
         case .pdf:
-            let parsed = PDFParserService.shared.parseMetadata(from: destURL)
+            guard let document = PDFDocument(url: destURL) else {
+                try? FileManager.default.removeItem(at: destURL)
+                throw PDFError.invalidFile
+            }
+            guard !document.isLocked else {
+                try? FileManager.default.removeItem(at: destURL)
+                throw PDFError.passwordProtected
+            }
+            let parsed = PDFParserService.shared.parseMetadata(from: document)
             title = parsed.title
             author = parsed.author
         case .epub:

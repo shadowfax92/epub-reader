@@ -129,6 +129,37 @@ final class PDFSelectionMapperTests: XCTestCase {
         XCTAssertEqual(word(result?.wordIndex ?? -1, in: paragraphs)?.text, "the")
     }
 
+    func testMisfiredOffsetFallsBackToExactSearch() {
+        let (paragraphs, locations) = assemble(pages)
+        // Offset points at "cat" but the selection is "dog run" — the geometric probe
+        // misfired; mapping must reject it and use the exact text search instead.
+        let catOffset = (pages[0] as NSString).range(of: "cat").location
+        let result = PDFSelectionMapper.findStartPosition(
+            selectionText: "dog run",
+            selectionStartOffset: catOffset,
+            pageIndex: 0,
+            pageString: pages[0],
+            paragraphs: paragraphs,
+            wordLocations: locations
+        )
+        XCTAssertEqual(word(result?.wordIndex ?? -1, in: paragraphs)?.text, "dog")
+    }
+
+    func testOffsetAcceptedForPartialWordSelection() {
+        let (paragraphs, locations) = assemble(pages)
+        // Selecting a fragment inside a word ("amma" of "gamma") still maps to that word.
+        let offset = (pages[1] as NSString).range(of: "amma").location
+        let result = PDFSelectionMapper.findStartPosition(
+            selectionText: "amma",
+            selectionStartOffset: offset,
+            pageIndex: 1,
+            pageString: pages[1],
+            paragraphs: paragraphs,
+            wordLocations: locations
+        )
+        XCTAssertEqual(word(result?.wordIndex ?? -1, in: paragraphs)?.text, "gamma")
+    }
+
     func testEmptySelectionReturnsNil() {
         let (paragraphs, locations) = assemble(pages)
         let result = PDFSelectionMapper.findStartPosition(

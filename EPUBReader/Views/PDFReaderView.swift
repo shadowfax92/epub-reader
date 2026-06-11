@@ -75,7 +75,10 @@ struct PDFReaderView: View {
             playbackManager.stop()
         }
         .onChange(of: playbackManager.isPlaying) { _, playing in
-            if playing { scheduleHideControls() }
+            if playing {
+                scheduleHideControls()
+                updateWordHighlight() // resume keeps the word index unchanged, so onChange alone won't fire
+            }
         }
         .onChange(of: playbackManager.currentGlobalWordIndex) { _, _ in
             updateWordHighlight()
@@ -273,9 +276,15 @@ struct PDFReaderView: View {
         // The view doesn't touch the document until the await returns, so the transfer is safe.
         let boxedDocument = UnsafeTransfer(value: document)
         let metadata = book
-        let parsed = await Task.detached(priority: .userInitiated) {
+        let parseTask = Task.detached(priority: .userInitiated) {
             PDFParserService.shared.parseBook(from: metadata, document: boxedDocument.value)
-        }.value
+        }
+        let parsed = await withTaskCancellationHandler {
+            await parseTask.value
+        } onCancel: {
+            parseTask.cancel()
+        }
+        guard !Task.isCancelled else { return } // dismissed mid-parse; result may be partial
         parsedPDF = parsed
 
         playbackManager.setBook(paragraphs: parsed.book.flatParagraphs)

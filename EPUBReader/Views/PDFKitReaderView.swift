@@ -78,15 +78,15 @@ struct PDFKitReaderView: UIViewRepresentable {
         context.coordinator.observe(pdfView)
         proxy.pdfView = pdfView
 
-        if let initialPageIndex, let page = document.page(at: initialPageIndex) {
-            // Layout fires PDFViewPageChanged for page 0 before the restore lands;
-            // suppress persistence until then so the saved page isn't clobbered.
-            context.coordinator.initialNavigationPending = true
+        if let initialPageIndex, document.page(at: initialPageIndex) != nil {
+            // Layout fires PDFViewPageChanged for page 0 before the restore lands; persistence
+            // stays suppressed until a page-change event confirms the target page (the page-changed
+            // observer re-issues the navigation if layout swallowed it).
+            context.coordinator.pendingInitialPageIndex = initialPageIndex
             let coordinator = context.coordinator
             // PDFView ignores go(to:) until it has laid out; defer one runloop turn.
-            DispatchQueue.main.async {
-                pdfView.go(to: page)
-                coordinator.initialNavigationPending = false
+            DispatchQueue.main.async { [weak pdfView] in
+                coordinator.attemptInitialNavigation(in: pdfView)
             }
         }
         return pdfView
@@ -114,8 +114,9 @@ struct PDFKitReaderView: UIViewRepresentable {
         var onTap: () -> Void
         var onSelectionChanged: (Bool) -> Void
         var onVisiblePageChanged: (Int) -> Void
-        var initialNavigationPending = false
+        var pendingInitialPageIndex: Int?
 
+        private var initialNavigationAttempts = 0
         private var currentAnnotations: [PDFAnnotation] = []
         private var lastHighlight: PDFWordHighlight?
         private var lastNavigatedPageIndex: Int?
@@ -157,16 +158,43 @@ struct PDFKitReaderView: UIViewRepresentable {
                 let pdfView = notification.object as? PDFView
                 Task { @MainActor in
                     guard let self, let pdfView,
-                          !self.initialNavigationPending,
                           let document = pdfView.document,
                           let page = pdfView.currentPage else { return }
-                    self.onVisiblePageChanged(document.index(for: page))
+                    let pageIndex = document.index(for: page)
+
+                    if let pending = self.pendingInitialPageIndex {
+                        if pageIndex == pending {
+                            self.pendingInitialPageIndex = nil
+                        } else {
+                            self.initialNavigationAttempts += 1
+                            if self.initialNavigationAttempts >= 5 {
+                                self.pendingInitialPageIndex = nil
+                            } else {
+                                self.attemptInitialNavigation(in: pdfView)
+                            }
+                        }
+                        return
+                    }
+                    self.onVisiblePageChanged(pageIndex)
                 }
             })
         }
 
         @objc func handleTap() {
             onTap()
+        }
+
+        func attemptInitialNavigation(in pdfView: PDFView?) {
+            guard let pdfView, let pending = pendingInitialPageIndex,
+                  let document = pdfView.document,
+                  let page = document.page(at: pending) else {
+                pendingInitialPageIndex = nil
+                return
+            }
+            pdfView.go(to: page)
+            if let current = pdfView.currentPage, document.index(for: current) == pending {
+                pendingInitialPageIndex = nil
+            }
         }
 
         nonisolated func gestureRecognizer(

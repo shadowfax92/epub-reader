@@ -66,7 +66,10 @@ struct ReaderView: View {
             playbackManager.stop()
         }
         .onChange(of: playbackManager.isPlaying) { _, playing in
-            if playing { scheduleHideControls() }
+            if playing {
+                scheduleHideControls()
+                updateWordHighlight() // resume keeps the word index unchanged, so onChange alone won't fire
+            }
         }
         .onChange(of: playbackManager.currentGlobalWordIndex) { _, _ in
             updateWordHighlight()

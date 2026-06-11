@@ -6,6 +6,18 @@ struct PDFMetadataResult {
     let author: String?
 }
 
+enum PDFError: LocalizedError {
+    case invalidFile
+    case passwordProtected
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidFile: return "Could not open this PDF file."
+        case .passwordProtected: return "This PDF is password-protected and can't be imported."
+        }
+    }
+}
+
 struct PDFWordLocation: Equatable {
     let pageIndex: Int
     /// UTF-16 range in the page's extracted string — the coordinate space `PDFPage.selection(for:)` expects.
@@ -30,6 +42,10 @@ final class PDFParserService: Sendable {
         guard let document = PDFDocument(url: url) else {
             return PDFMetadataResult(title: nil, author: nil)
         }
+        return parseMetadata(from: document)
+    }
+
+    func parseMetadata(from document: PDFDocument) -> PDFMetadataResult {
         let attributes = document.documentAttributes ?? [:]
         return PDFMetadataResult(
             title: nonEmptyAttribute(attributes[PDFDocumentAttribute.titleAttribute]),
@@ -54,6 +70,7 @@ final class PDFParserService: Sendable {
         var globalParagraphIndex = 0
 
         for pageIndex in 0..<document.pageCount {
+            if Task.isCancelled { break } // reader was dismissed mid-parse; partial result is discarded
             guard let page = document.page(at: pageIndex),
                   let pageString = page.string else { continue }
 

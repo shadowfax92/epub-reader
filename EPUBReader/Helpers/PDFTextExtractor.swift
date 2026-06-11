@@ -95,7 +95,7 @@ enum PDFTextExtractor {
         for entry in tokens {
             if let last = merged.last,
                entry.lineBreaksBefore == 1,
-               last.token.text.hasSuffix("-"),
+               endsWithHyphen(last.token.text),
                last.token.text.count > 1 {
                 let text = String(last.token.text.dropLast()) + entry.token.text
                 let range = NSUnionRange(last.token.range, entry.token.range)
@@ -118,6 +118,12 @@ enum PDFTextExtractor {
     /// Matches CharacterSet.newlines minus \r (handled by the CRLF pairing branch).
     private static func isLineBreak(_ c: unichar) -> Bool {
         c == 0x0A || c == 0x0B || c == 0x0C || c == 0x85 || c == 0x2028 || c == 0x2029
+    }
+
+    /// ASCII hyphen, soft hyphen, and U+2010 — all appear as end-of-line hyphenation in PDFs.
+    private static func endsWithHyphen(_ text: String) -> Bool {
+        guard let last = text.last else { return false }
+        return last == "-" || last == "\u{00AD}" || last == "\u{2010}"
     }
 
     private static func endsSentence(_ text: String) -> Bool {

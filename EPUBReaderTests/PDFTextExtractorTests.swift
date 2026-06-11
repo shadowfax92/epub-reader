@@ -60,6 +60,17 @@ final class PDFTextExtractorTests: XCTestCase {
         XCTAssertEqual(tokens.map(\.text), ["a", "multilineword", "here"])
     }
 
+    func testSoftHyphenAndU2010AtLineBreakMerge() {
+        XCTAssertEqual(
+            allTokens(PDFTextExtractor.paragraphs(from: "exam\u{00AD}\nple here")).map(\.text),
+            ["example", "here"]
+        )
+        XCTAssertEqual(
+            allTokens(PDFTextExtractor.paragraphs(from: "exam\u{2010}\nple here")).map(\.text),
+            ["example", "here"]
+        )
+    }
+
     func testHyphenCompoundOnSameLineUnchanged() {
         let tokens = allTokens(PDFTextExtractor.paragraphs(from: "a well-known fact"))
         XCTAssertEqual(tokens.map(\.text), ["a", "well-known", "fact"])
