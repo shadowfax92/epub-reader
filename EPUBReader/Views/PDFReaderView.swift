@@ -347,8 +347,10 @@ struct PDFReaderView: View {
             return
         }
 
+        // Clamp: a persisted index can go stale if extraction logic changes across app updates.
         let position = bookStore.getReadingPosition(bookId: book.id)
-        let paragraphIdx = position?.paragraphIndex ?? 0
+        let maxIndex = parsedPDF.book.flatParagraphs.count - 1
+        let paragraphIdx = min(max(0, position?.paragraphIndex ?? 0), maxIndex)
         let wordIdx = position?.globalWordIndex ?? 0
         playbackManager.play(fromParagraphIndex: paragraphIdx, wordIndex: wordIdx)
     }

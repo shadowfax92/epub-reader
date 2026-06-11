@@ -133,10 +133,15 @@ class BookStore: ObservableObject {
             title = parsed.title
             author = parsed.author
         case .epub:
-            let publication = try await ReadiumService.shared.openPublication(at: destURL)
-            let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
-            title = parsed.title
-            author = parsed.author
+            do {
+                let publication = try await ReadiumService.shared.openPublication(at: destURL)
+                let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
+                title = parsed.title
+                author = parsed.author
+            } catch {
+                try? FileManager.default.removeItem(at: destURL)
+                throw error
+            }
         }
 
         let book = BookMetadata(

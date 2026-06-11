@@ -6,11 +6,15 @@ import PDFKit
 enum PDFTestFixtures {
 
     /// Each element of `pages` is drawn on its own page; an empty string yields a page with no text.
-    static func makePDF(pages: [String], title: String? = nil, author: String? = nil) throws -> URL {
+    static func makePDF(pages: [String], title: String? = nil, author: String? = nil, password: String? = nil) throws -> URL {
         let format = UIGraphicsPDFRendererFormat()
         var info: [String: Any] = [:]
         if let title { info[kCGPDFContextTitle as String] = title }
         if let author { info[kCGPDFContextAuthor as String] = author }
+        if let password {
+            info[kCGPDFContextUserPassword as String] = password
+            info[kCGPDFContextOwnerPassword as String] = password
+        }
         format.documentInfo = info
 
         let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)

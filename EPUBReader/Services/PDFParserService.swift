@@ -6,7 +6,7 @@ struct PDFMetadataResult {
     let author: String?
 }
 
-enum PDFError: LocalizedError {
+enum PDFError: LocalizedError, Equatable {
     case invalidFile
     case passwordProtected
 
