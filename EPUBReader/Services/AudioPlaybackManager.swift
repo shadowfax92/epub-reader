@@ -34,9 +34,18 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
     private var onPositionUpdate: ((ReadingPosition) -> Void)?
 
-    /// Fires (globalWordIndex, paragraphId) straight from the sync timer so the
-    /// decoration applies without waiting on a SwiftUI onChange view-update hop.
-    var onWordChange: ((Int, Int) -> Void)?
+    /// Fires on word boundaries straight from the sync timer so the decoration
+    /// applies without waiting on a SwiftUI onChange view-update hop; consumers
+    /// read the published word/paragraph state, which is set before each fire.
+    var onWordChange: (() -> Void)?
+
+    /// Break the manager→closure→view retain cycle when the reader closes:
+    /// both callbacks capture the view copy, whose StateObject storage
+    /// strongly retains this manager.
+    func clearCallbacks() {
+        onWordChange = nil
+        onPositionUpdate = nil
+    }
 
     private struct CachedAudio {
         let audioData: Data
@@ -313,7 +322,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             currentGlobalWordIndex = startFromWordGlobal > 0 ? startFromWordGlobal : firstWord.id
             // Unconditional fire: resuming on the same word produces no
             // index change, but the decoration still needs an initial draw.
-            onWordChange?(currentGlobalWordIndex, paragraphId)
+            onWordChange?()
         }
 
         audioPlayer?.play()
@@ -350,7 +359,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             ?? wordTimings.first?.globalWordIndex
         if let index, index != currentGlobalWordIndex {
             currentGlobalWordIndex = index
-            onWordChange?(index, currentParagraphId)
+            onWordChange?()
         }
     }
 
@@ -461,7 +470,9 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             )
             // Raw alignment's characters match the input text exactly;
             // normalized_alignment expands numbers/abbreviations and drifts.
-            let alignment = response.alignment ?? response.normalized_alignment
+            let alignment = [response.alignment, response.normalized_alignment]
+                .compactMap { $0 }
+                .first { !$0.characters.isEmpty }
             let timings = TTSTimingMapper.mapAlignment(
                 characters: alignment?.characters ?? [],
                 startTimes: alignment?.character_start_times_seconds ?? [],

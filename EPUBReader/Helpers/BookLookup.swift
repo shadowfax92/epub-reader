@@ -3,8 +3,9 @@ import Foundation
 /// O(1) lookups for the per-word highlight path, exploiting two parser
 /// invariants (EPUBParserService): a paragraph's id is its index in
 /// flatParagraphs, and global word ids are contiguous within a paragraph.
-/// Every lookup verifies the invariant and falls back to a scan if it ever
-/// breaks, so these are fast when well-formed and never wrong.
+/// Every lookup verifies the invariant and falls back to a scan on any miss
+/// (absent id or broken invariant — exhaustion alone can't tell them apart),
+/// so they're fast when well-formed and never wrong.
 extension ParsedBook {
     func paragraph(withId id: Int) -> BookParagraph? {
         if let candidate = flatParagraphs[safe: id], candidate.id == id {

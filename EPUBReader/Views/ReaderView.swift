@@ -66,6 +66,7 @@ struct ReaderView: View {
         .task { await loadBook() }
         .onDisappear {
             playbackManager.stop()
+            playbackManager.clearCallbacks()
         }
         .onChange(of: playbackManager.isPlaying) { _, playing in
             if playing { scheduleHideControls() }
@@ -443,7 +444,7 @@ struct ReaderView: View {
 
             navigator = nav
             isLoading = false
-            playbackManager.onWordChange = { [self] _, _ in
+            playbackManager.onWordChange = { [self] in
                 updateWordHighlight()
             }
             applyHighlightDecorations()
