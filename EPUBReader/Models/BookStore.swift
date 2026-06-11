@@ -116,7 +116,7 @@ class BookStore: ObservableObject {
             throw EPUBError.notAnEPUB
         }
 
-        let fileName = sourceURL.lastPathComponent
+        let fileName = availableFileName(for: sourceURL.lastPathComponent)
 
         // Stage in tmp and only install into Books/ after a successful parse:
         // a mid-copy or parse failure must never leave partial junk in Books/
@@ -171,6 +171,20 @@ class BookStore: ObservableObject {
         books.insert(book, at: 0)
         saveBooks()
         return book
+    }
+
+    /// Same-named imports get "name-2.epub"-style suffixes: Books/ entries
+    /// are keyed by file name, so reusing one would cross-link two library
+    /// entries to a single file (deleting either would orphan the other).
+    private func availableFileName(for proposed: String) -> String {
+        func taken(_ name: String) -> Bool { books.contains { $0.fileName == name } }
+        guard taken(proposed) else { return proposed }
+        let base = (proposed as NSString).deletingPathExtension
+        let ext = (proposed as NSString).pathExtension
+        var n = 2
+        func candidate(_ n: Int) -> String { ext.isEmpty ? "\(base)-\(n)" : "\(base)-\(n).\(ext)" }
+        while taken(candidate(n)) { n += 1 }
+        return candidate(n)
     }
 
     /// Coordinated read before copying picker items into the sandbox. The
