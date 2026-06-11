@@ -19,7 +19,8 @@ if [ ! -w "$INSTALL_DIR" ]; then
 fi
 
 APP_NAME="$(basename "$APP_BUNDLE" .app)"
-BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw -o - "$APP_BUNDLE/Info.plist")"
+BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw -o - "$APP_BUNDLE/Info.plist" 2>/dev/null || true)"
+[ -n "$BUNDLE_ID" ] || die "could not read CFBundleIdentifier from $APP_BUNDLE/Info.plist"
 
 IDENTITIES=$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/{print $2}' || true)
 [ -n "$IDENTITIES" ] || die "no 'Apple Development' signing identity in the keychain.
@@ -27,7 +28,7 @@ Open Xcode → Settings → Accounts and sign in with your Apple ID once (same s
 
 # -json: system_profiler's text labels are localized, the JSON keys are not
 UDID=$(system_profiler -json SPHardwareDataType 2>/dev/null \
-  | plutil -extract 'SPHardwareDataType.0.provisioning_UDID' raw -o - -- -)
+  | plutil -extract 'SPHardwareDataType.0.provisioning_UDID' raw -o - -- - 2>/dev/null || true)
 [ -n "$UDID" ] || die "could not read this Mac's provisioning UDID"
 
 # Find an (identity, profile) pair: profile must provision this Mac, embed the
