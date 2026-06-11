@@ -79,7 +79,7 @@ what the iPhone flow already needs.
 
 ```sh
 brew install xcodegen    # if you don't have it
-make install-mac
+make install
 ```
 
 The app lands in `/Applications` (or `~/Applications` if that's not writable). Launch it from
@@ -89,7 +89,8 @@ Spotlight, or:
 open /Applications/EPUBReader.app
 ```
 
-Other targets: `make build-mac` (build without installing) · `make clean` (drop local build artifacts).
+Use `make` to build without installing. Explicit aliases still work:
+`make build-mac`, `make install-mac`, and `make clean`.
 
 > 🍎 Requires an Apple Silicon Mac (M1 or later) with Xcode signed into your Apple ID
 > (**Xcode → Settings → Accounts** — free account works). The install reuses your existing
@@ -97,7 +98,7 @@ Other targets: `make build-mac` (build without installing) · `make clean` (drop
 > covers your Mac, open this project in Xcode, pick your team, and run it once with destination
 > **My Mac (Designed for iPad)** — free accounts get per-app profiles, so it must be this project —
 > and retry. With a free account the profile expires after ~7 days (same as the iPhone flow) — if
-> the Mac app stops opening, build once from Xcode to refresh it, then `make install-mac` again.
+> the Mac app stops opening, build once from Xcode to refresh it, then `make install` again.
 > Intel Macs can't run iOS apps.
 
 ---
