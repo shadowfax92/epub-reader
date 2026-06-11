@@ -24,8 +24,6 @@ struct ReaderView: View {
     @State private var hasTextSelection = false
     @State private var navigationTask: Task<Void, Never>?
 
-    private let speedOptions: [Double] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.5]
-
     private var theme: ReaderTheme { bookStore.readerTheme }
 
     private var bookProgressPercent: Int? {
@@ -173,149 +171,16 @@ struct ReaderView: View {
                 }
                 .padding(.horizontal, 16)
 
-                if playbackManager.isLoadingAudio {
-                    ProgressView()
-                        .tint(Color.accentColor)
-                }
-
-                if let error = playbackManager.error {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
-
-                // Theme pills
-                HStack(spacing: 8) {
-                    ForEach(ReaderTheme.allCases, id: \.rawValue) { t in
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                bookStore.readerTheme = t
-                            }
-                        } label: {
-                            Text(t.label)
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(
-                                    Capsule()
-                                        .fill(theme == t ? Color.accentColor : Color(.systemGray5))
-                                )
-                                .foregroundStyle(theme == t ? .white : .primary)
-                        }
-                    }
-
-                    Spacer()
-
-                    HStack(spacing: 8) {
-                        Button {
-                            if bookStore.fontSize > 12 { bookStore.fontSize -= 1 }
-                        } label: {
-                            Text("A")
-                                .font(.system(size: 13, weight: .medium))
-                                .frame(width: 30, height: 30)
-                                .background(Circle().fill(Color(.systemGray5)))
-                                .foregroundStyle(.primary)
-                        }
-
-                        Text("\(Int(bookStore.fontSize))")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 22)
-
-                        Button {
-                            if bookStore.fontSize < 32 { bookStore.fontSize += 1 }
-                        } label: {
-                            Text("A")
-                                .font(.system(size: 17, weight: .medium))
-                                .frame(width: 30, height: 30)
-                                .background(Circle().fill(Color(.systemGray5)))
-                                .foregroundStyle(.primary)
-                        }
-                    }
-                }
-                .padding(.horizontal, 20)
-
-                // Speed pills
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(speedOptions, id: \.self) { speed in
-                            Button {
-                                currentSpeed = speed
-                                playbackManager.speed = speed
-                                bookStore.playbackSpeed = speed
-                            } label: {
-                                Text(formatSpeed(speed))
-                                    .font(.caption.weight(.medium))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(
-                                        Capsule()
-                                            .fill(currentSpeed == speed ? Color.accentColor : Color(.systemGray5))
-                                    )
-                                    .foregroundStyle(currentSpeed == speed ? .white : .primary)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                }
-
-                HStack(spacing: 12) {
-                    if hasTextSelection {
-                        Button {
-                            if let nav = navigator, let sel = nav.currentSelection {
-                                startTTSFromSelection(sel)
-                            }
-                        } label: {
-                            Label("Play from selection", systemImage: "text.line.first.and.arrowtriangle.forward")
-                                .font(.subheadline.weight(.medium))
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(Capsule().fill(Color.accentColor))
-                                .foregroundStyle(.white)
-                        }
-                    }
-
-                    Button {
-                        jumpToCurrentPosition()
-                    } label: {
-                        Label("Jump to position", systemImage: "scope")
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(Capsule().fill(Color(.systemGray5)))
-                            .foregroundStyle(.primary)
-                    }
-                }
-
-                // Playback controls
-                HStack(spacing: 36) {
-                    Button { playbackManager.skip(seconds: -10) } label: {
-                        Image(systemName: "gobackward.10")
-                            .font(.title2)
-                            .foregroundStyle(.primary)
-                            .frame(width: 48, height: 48)
-                    }
-
-                    Button { handlePlayPause() } label: {
-                        Image(systemName: playbackManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 56))
-                            .foregroundStyle(Color.accentColor)
-                    }
-
-                    Button { playbackManager.skip(seconds: 10) } label: {
-                        Image(systemName: "goforward.10")
-                            .font(.title2)
-                            .foregroundStyle(.primary)
-                            .frame(width: 48, height: 48)
-                    }
-                }
-
-                if let progress = bookProgressPercent {
-                    Text("\(progress)%")
-                        .font(.caption2.weight(.medium).monospacedDigit())
-                        .foregroundStyle(.secondary)
+                PlaybackControlsView(
+                    playbackManager: playbackManager,
+                    currentSpeed: $currentSpeed,
+                    progressPercent: bookProgressPercent,
+                    onSpeedChange: { bookStore.playbackSpeed = $0 },
+                    onPlayPause: handlePlayPause
+                ) {
+                    themeAndFontRow
+                } actionAccessory: {
+                    selectionActionsRow
                 }
 
                 Spacer().frame(height: 8)
@@ -324,6 +189,88 @@ struct ReaderView: View {
             .background(.ultraThinMaterial)
         }
         .transition(.opacity)
+    }
+
+    private var themeAndFontRow: some View {
+        HStack(spacing: 8) {
+            ForEach(ReaderTheme.allCases, id: \.rawValue) { t in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        bookStore.readerTheme = t
+                    }
+                } label: {
+                    Text(t.label)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(theme == t ? Color.accentColor : Color(.systemGray5))
+                        )
+                        .foregroundStyle(theme == t ? .white : .primary)
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Button {
+                    if bookStore.fontSize > 12 { bookStore.fontSize -= 1 }
+                } label: {
+                    Text("A")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Color(.systemGray5)))
+                        .foregroundStyle(.primary)
+                }
+
+                Text("\(Int(bookStore.fontSize))")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+
+                Button {
+                    if bookStore.fontSize < 32 { bookStore.fontSize += 1 }
+                } label: {
+                    Text("A")
+                        .font(.system(size: 17, weight: .medium))
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Color(.systemGray5)))
+                        .foregroundStyle(.primary)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private var selectionActionsRow: some View {
+        HStack(spacing: 12) {
+            if hasTextSelection {
+                Button {
+                    if let nav = navigator, let sel = nav.currentSelection {
+                        startTTSFromSelection(sel)
+                    }
+                } label: {
+                    Label("Play from selection", systemImage: "text.line.first.and.arrowtriangle.forward")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(Color.accentColor))
+                        .foregroundStyle(.white)
+                }
+            }
+
+            Button {
+                jumpToCurrentPosition()
+            } label: {
+                Label("Jump to position", systemImage: "scope")
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color(.systemGray5)))
+                    .foregroundStyle(.primary)
+            }
+        }
     }
 
     // MARK: - Chapter List
@@ -717,13 +664,6 @@ struct ReaderView: View {
                 showControls = false
             }
         }
-    }
-
-    private func formatSpeed(_ speed: Double) -> String {
-        if speed == Double(Int(speed)) {
-            return "\(Int(speed)).0x"
-        }
-        return String(format: "%.2gx", speed)
     }
 
     private func errorView(_ error: String) -> some View {
