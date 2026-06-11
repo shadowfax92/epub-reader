@@ -11,6 +11,20 @@ final class EPUBImportTests: XCTestCase {
         XCTAssertTrue(EPUBImport.allowedContentTypes.contains(.folder))
     }
 
+    func testAllowedContentTypesIncludePackage() {
+        XCTAssertTrue(EPUBImport.allowedContentTypes.contains(.package))
+    }
+
+    func testExplodedEPUBPackageUTIMatchesAnAllowedType() throws {
+        guard let ibooksEPUB = UTType("com.apple.ibooks.epub") else {
+            throw XCTSkip("com.apple.ibooks.epub not registered in this environment")
+        }
+        XCTAssertTrue(
+            EPUBImport.allowedContentTypes.contains { ibooksEPUB.conforms(to: $0) },
+            "macOS resolves exploded EPUB directories to com.apple.ibooks.epub; the picker must accept it"
+        )
+    }
+
     // MARK: - isExplodedEPUBDirectory: valid cases
 
     func testFullExplodedEPUBIsValid() throws {
