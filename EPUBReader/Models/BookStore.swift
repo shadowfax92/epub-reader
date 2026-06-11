@@ -116,13 +116,24 @@ class BookStore: ObservableObject {
         }
         try FileManager.default.copyItem(at: sourceURL, to: destURL)
 
-        let publication = try await ReadiumService.shared.openPublication(at: destURL)
-        let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
+        let title: String?
+        let author: String?
+        switch BookFormat(fileName: fileName) {
+        case .pdf:
+            let parsed = PDFParserService.shared.parseMetadata(from: destURL)
+            title = parsed.title
+            author = parsed.author
+        case .epub:
+            let publication = try await ReadiumService.shared.openPublication(at: destURL)
+            let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
+            title = parsed.title
+            author = parsed.author
+        }
 
         let book = BookMetadata(
             id: UUID(),
-            title: parsed.title ?? fileName.replacingOccurrences(of: ".epub", with: ""),
-            author: parsed.author ?? "Unknown Author",
+            title: title ?? BookMetadata.fallbackTitle(forFileName: fileName),
+            author: author ?? "Unknown Author",
             fileName: fileName,
             dateAdded: Date()
         )

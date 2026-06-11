@@ -10,6 +10,18 @@ packages:
     url: https://github.com/readium/swift-toolkit.git
     from: "3.7.0"
 
+schemes:
+  EPUBReader:
+    build:
+      targets:
+        EPUBReader: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - EPUBReaderTests
+
 targets:
   EPUBReader:
     type: application

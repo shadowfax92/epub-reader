@@ -31,7 +31,7 @@ struct LibraryView: View {
         }
         .fileImporter(
             isPresented: $showFilePicker,
-            allowedContentTypes: [UTType(filenameExtension: "epub") ?? UTType("org.idpf.epub-container") ?? .data],
+            allowedContentTypes: [UTType(filenameExtension: "epub") ?? UTType("org.idpf.epub-container") ?? .data, .pdf],
             allowsMultipleSelection: false
         ) { result in
             handleFileImport(result)
@@ -57,7 +57,7 @@ struct LibraryView: View {
             Text("No Books")
                 .font(.title2)
                 .fontWeight(.medium)
-            Text("Import an EPUB from Files")
+            Text("Import an EPUB or PDF from Files")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Button {
