@@ -18,7 +18,13 @@ INSTALL_DIR ?= /Applications
 
 REQUIRE_XCODEGEN = @command -v $(XCODEGEN) >/dev/null 2>&1 || { echo "error: xcodegen not found — brew install xcodegen"; exit 1; }
 
-.PHONY: generate build-mac install-mac clean check-arch
+.DEFAULT_GOAL := build
+
+.PHONY: build install generate build-mac install-mac clean check-arch
+
+build: build-mac
+
+install: install-mac
 
 generate:
 	$(REQUIRE_XCODEGEN)
