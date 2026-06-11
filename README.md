@@ -93,7 +93,8 @@ Other targets: `make build-mac` (build without installing) · `make clean` (drop
 > 🍎 Requires an Apple Silicon Mac (M1 or later) with Xcode signed into your Apple ID
 > (**Xcode → Settings → Accounts** — free account works). The install reuses your existing
 > development certificate and provisioning profile automatically. If it reports that no profile
-> covers your Mac, run any project once from Xcode with destination **My Mac (Designed for iPad)**
+> covers your Mac, open this project in Xcode, pick your team, and run it once with destination
+> **My Mac (Designed for iPad)** — free accounts get per-app profiles, so it must be this project —
 > and retry. With a free account the profile expires after ~7 days (same as the iPhone flow) — if
 > the Mac app stops opening, build once from Xcode to refresh it, then `make install-mac` again.
 > Intel Macs can't run iOS apps.

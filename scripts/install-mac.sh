@@ -21,16 +21,20 @@ fi
 APP_NAME="$(basename "$APP_BUNDLE" .app)"
 BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw -o - "$APP_BUNDLE/Info.plist")"
 
-IDENTITIES=$(security find-identity -v -p codesigning | awk '/Apple Development/{print $2}')
+IDENTITIES=$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/{print $2}' || true)
 [ -n "$IDENTITIES" ] || die "no 'Apple Development' signing identity in the keychain.
 Open Xcode → Settings → Accounts and sign in with your Apple ID once (same setup the iPhone flow needs)."
 
-UDID=$(system_profiler SPHardwareDataType | awk '/Provisioning UDID/{print $NF}')
+# -json: system_profiler's text labels are localized, the JSON keys are not
+UDID=$(system_profiler -json SPHardwareDataType 2>/dev/null \
+  | plutil -extract 'SPHardwareDataType.0.provisioning_UDID' raw -o - -- -)
 [ -n "$UDID" ] || die "could not read this Mac's provisioning UDID"
 
 # Find an (identity, profile) pair: profile must provision this Mac, embed the
-# identity's certificate, match the bundle id, and not be expired.
-PROFILE="" IDENTITY="" TEAM=""
+# identity's certificate, match the bundle id, and not be expired. Among
+# matches, keep the one expiring last (refreshed profiles accumulate next to
+# older still-valid ones).
+PROFILE="" IDENTITY="" TEAM="" BEST_EXPIRY=""
 DECODED=$(mktemp)
 trap 'rm -rf "$DECODED" ${STAGE:+"$STAGE"}' EXIT
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -53,15 +57,19 @@ for p in ~/Library/Developer/Xcode/UserData/"Provisioning Profiles"/*.mobileprov
       | base64 -d 2>/dev/null | shasum -a 1 | awk '{print toupper($1)}'); do
     for id in $IDENTITIES; do
       if [ "$cert_sha" = "$id" ]; then
-        PROFILE="$p" IDENTITY="$id" TEAM="$team"
-        break 3
+        if [ -z "$BEST_EXPIRY" ] || [ "$expiry" \> "$BEST_EXPIRY" ]; then
+          PROFILE="$p" IDENTITY="$id" TEAM="$team" BEST_EXPIRY="$expiry"
+        fi
+        break 2
       fi
     done
     i=$((i+1))
   done
 done
 [ -n "$PROFILE" ] || die "no provisioning profile covers this Mac (UDID $UDID) for $BUNDLE_ID.
-Run any project once from Xcode with destination 'My Mac (Designed for iPad)' to let Xcode create one, then retry."
+Open the Xcode project, pick your team under Signing & Capabilities, and run once with
+destination 'My Mac (Designed for iPad)' to create one, then retry. (Free accounts get
+per-app profiles, so it must be this project — not just any project.)"
 
 echo "Signing with team $TEAM, profile: $(basename "$PROFILE")"
 
