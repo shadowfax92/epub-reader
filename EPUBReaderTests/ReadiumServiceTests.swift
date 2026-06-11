@@ -19,9 +19,10 @@ final class ReadiumServiceTests: XCTestCase {
         let dir = try EPUBFixtures.explodedEPUB(named: "NoSlash.epub")
         defer { EPUBFixtures.cleanup(dir) }
 
-        // Rebuild the URL the way BookStore/BookMetadata do — appendingPathComponent
-        // with no isDirectory hint, so it lacks the trailing slash.
-        let hintless = dir.deletingLastPathComponent().appendingPathComponent(dir.lastPathComponent)
+        // Force a slash-less URL, like ones built before the item exists on
+        // disk (BookStore's destURL). appendingPathComponent won't do: it
+        // stats existing directories and silently adds the trailing slash.
+        let hintless = URL(fileURLWithPath: dir.path, isDirectory: false)
 
         let publication = try await ReadiumService.shared.openPublication(at: hintless)
 

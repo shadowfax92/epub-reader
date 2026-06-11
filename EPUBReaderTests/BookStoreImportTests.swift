@@ -61,4 +61,15 @@ final class BookStoreImportTests: XCTestCase {
 
         XCTAssertEqual(booksDirContents(), before, "failed import must clean up the copied item")
     }
+
+    func testCoordinatedCopyCopiesRegularFile() async throws {
+        let dir = try EPUBFixtures.directory(files: ["sample.epub": "zipped-bytes-stand-in"])
+        defer { EPUBFixtures.cleanup(dir) }
+        let source = dir.appendingPathComponent("sample.epub")
+        let destination = dir.appendingPathComponent("copy.epub")
+
+        try await BookStore.coordinatedCopy(from: source, to: destination)
+
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "zipped-bytes-stand-in")
+    }
 }

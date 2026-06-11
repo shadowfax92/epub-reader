@@ -116,37 +116,45 @@ class BookStore: ObservableObject {
         }
 
         let fileName = sourceURL.lastPathComponent
-        let destURL = booksDirectoryURL.appendingPathComponent(fileName)
 
+        // Stage in tmp and only install into Books/ after a successful parse:
+        // a mid-copy or parse failure must never leave partial junk in Books/
+        // or delete an existing same-named book's file.
+        let stagingDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("import-\(UUID().uuidString)", isDirectory: true)
+        let stagedURL = stagingDir.appendingPathComponent(fileName)
+        try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: stagingDir) }
+
+        try await Self.coordinatedCopy(from: sourceURL, to: stagedURL)
+
+        let publication = try await ReadiumService.shared.openPublication(at: stagedURL)
+        let parsed = EPUBParserService.shared.parseMetadata(from: stagedURL, publication: publication)
+
+        let destURL = booksDirectoryURL.appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: destURL.path) {
             try FileManager.default.removeItem(at: destURL)
         }
-        try Self.coordinatedCopy(from: sourceURL, to: destURL)
+        try FileManager.default.moveItem(at: stagedURL, to: destURL)
 
-        do {
-            let publication = try await ReadiumService.shared.openPublication(at: destURL)
-            let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
+        let book = BookMetadata(
+            id: UUID(),
+            title: parsed.title ?? fileName.replacingOccurrences(of: ".epub", with: ""),
+            author: parsed.author ?? "Unknown Author",
+            fileName: fileName,
+            dateAdded: Date()
+        )
 
-            let book = BookMetadata(
-                id: UUID(),
-                title: parsed.title ?? fileName.replacingOccurrences(of: ".epub", with: ""),
-                author: parsed.author ?? "Unknown Author",
-                fileName: fileName,
-                dateAdded: Date()
-            )
-
-            books.insert(book, at: 0)
-            saveBooks()
-            return book
-        } catch {
-            try? FileManager.default.removeItem(at: destURL)
-            throw error
-        }
+        books.insert(book, at: 0)
+        saveBooks()
+        return book
     }
 
     /// Coordinated read so iCloud-backed picker items (files or whole folders)
     /// are materialized by the system before we copy them into the sandbox.
-    private static func coordinatedCopy(from source: URL, to destination: URL) throws {
+    /// Nonisolated on purpose: materialization can download for minutes and
+    /// must not block the main actor.
+    nonisolated static func coordinatedCopy(from source: URL, to destination: URL) async throws {
         var coordinatorError: NSError?
         var copyError: Error?
         NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinatorError) { url in
