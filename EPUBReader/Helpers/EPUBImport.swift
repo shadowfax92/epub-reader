@@ -32,8 +32,10 @@ enum EPUBImport {
         }
         // Placeholder-only mimetype: content unreadable until download, but a
         // folder carrying an OCF `mimetype` entry is an EPUB for our purposes;
-        // Readium remains the final arbiter after the copy.
-        return entryExists(in: url, at: "mimetype")
+        // Readium remains the final arbiter after the copy. A present-but-
+        // undecodable real file is NOT treated as a declaration.
+        return !FileManager.default.fileExists(atPath: mimetype.path)
+            && FileManager.default.fileExists(atPath: url.appendingPathComponent(".mimetype.icloud").path)
     }
 
     private static func entryExists(in dir: URL, at relativePath: String) -> Bool {

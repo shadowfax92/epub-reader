@@ -70,6 +70,13 @@ final class EPUBImportTests: XCTestCase {
         XCTAssertFalse(EPUBImport.isExplodedEPUBDirectory(file))
     }
 
+    func testUndecodableMimetypeWithoutContainerXMLIsInvalid() throws {
+        let dir = try EPUBFixtures.directory(files: [:])
+        defer { EPUBFixtures.cleanup(dir) }
+        try Data([0xFF, 0xFE, 0xFA]).write(to: dir.appendingPathComponent("mimetype"))
+        XCTAssertFalse(EPUBImport.isExplodedEPUBDirectory(dir))
+    }
+
     func testNonexistentPathIsInvalid() {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("EPUBImportTests-missing-\(UUID().uuidString)")
