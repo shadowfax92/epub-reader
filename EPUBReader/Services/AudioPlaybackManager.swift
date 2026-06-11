@@ -20,6 +20,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     private var prefetchedTimings: [WordTiming]?
     private var prefetchedIndex: Int?
     private var prefetchTask: Task<Void, Never>?
+    private var playTask: Task<Void, Never>?
 
     // Cache generated audio to avoid re-spending credits on replayed paragraphs
     private var audioCache: [Int: CachedAudio] = [:]
@@ -81,7 +82,8 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         stopSyncTimer()
 
         currentParagraphArrayIndex = index
-        Task { await generateAndPlay(paragraphIndex: index, startFromWordGlobal: wordIndex) }
+        playTask?.cancel()
+        playTask = Task { await generateAndPlay(paragraphIndex: index, startFromWordGlobal: wordIndex) }
     }
 
     func playFromGlobalWord(_ globalWordIndex: Int) {
@@ -138,6 +140,9 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         audioPlayer = nil
         isPlaying = false
         stopSyncTimer()
+        // Without this, an in-flight TTS request finishes after the reader
+        // closes and starts ghost audio with no UI attached.
+        playTask?.cancel()
         prefetchTask?.cancel()
         prefetchedAudio = nil
         prefetchedTimings = nil
@@ -189,6 +194,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     }
 
     private func generateAndPlay(paragraphIndex: Int, startFromWordGlobal: Int = 0) async {
+        guard !Task.isCancelled else { return }
         var idx = paragraphIndex
 
         while idx < allParagraphs.count {
@@ -272,6 +278,13 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             )
 
             cacheAudio(audioData: audioData, timings: timings, paragraphId: paragraph.id)
+
+            // Cancelled mid-request (reader closed or superseded by a newer
+            // play): keep the paid TTS result cached but don't start audio.
+            guard !Task.isCancelled else {
+                isLoadingAudio = false
+                return
+            }
 
             try startPlayback(
                 audioData: audioData,
@@ -422,7 +435,8 @@ class AudioPlaybackManager: NSObject, ObservableObject {
                 isPlaying = false
             }
         } else {
-            Task { await generateAndPlay(paragraphIndex: nextIndex) }
+            playTask?.cancel()
+            playTask = Task { await generateAndPlay(paragraphIndex: nextIndex) }
         }
     }
 

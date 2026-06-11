@@ -375,6 +375,11 @@ struct ReaderView: View {
             publication = pub
 
             let parsed = try await EPUBParserService.shared.parseBook(from: book, publication: pub)
+            // Last suspension point: everything below runs synchronously on the
+            // MainActor, so this single check closes the race where a dismissed
+            // view's loadBook re-registers callbacks onDisappear just cleared
+            // (recreating the manager↔view retain cycle with nothing to break it).
+            guard !Task.isCancelled else { return }
             parsedBook = parsed
 
             playbackManager.setBook(paragraphs: parsed.flatParagraphs)
@@ -430,7 +435,8 @@ struct ReaderView: View {
             nav.delegate = delegate
             navigatorDelegate = delegate
 
-            if let position = bookStore.getReadingPosition(bookId: book.id) {
+            let savedPosition = bookStore.getReadingPosition(bookId: book.id)
+            if let position = savedPosition {
                 playbackManager.currentGlobalWordIndex = position.globalWordIndex
                 let paraIdx = min(position.paragraphIndex, parsed.flatParagraphs.count - 1)
                 if paraIdx >= 0 {
@@ -448,7 +454,7 @@ struct ReaderView: View {
                 updateWordHighlight()
             }
             applyHighlightDecorations()
-            if bookStore.getReadingPosition(bookId: book.id) != nil {
+            if savedPosition != nil {
                 updateWordHighlight()
             }
         } catch {
