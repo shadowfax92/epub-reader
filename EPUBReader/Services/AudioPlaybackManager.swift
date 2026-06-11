@@ -73,6 +73,16 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         audioCache.removeAll()
     }
 
+    /// Restores a persisted position including the private paragraph cursor —
+    /// without this, a stop() before any playback would save paragraphIndex 0
+    /// and regress the reader to the start of the book.
+    func restorePosition(paragraphArrayIndex: Int, paragraphId: Int, globalWordIndex: Int) {
+        guard !allParagraphs.isEmpty else { return }
+        currentParagraphArrayIndex = min(max(0, paragraphArrayIndex), allParagraphs.count - 1)
+        currentParagraphId = paragraphId
+        currentGlobalWordIndex = globalWordIndex
+    }
+
     func play(fromParagraphIndex index: Int, wordIndex: Int = 0) {
         // Stop playback but preserve prefetched audio
         saveCurrentPosition()

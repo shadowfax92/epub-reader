@@ -1,4 +1,5 @@
 import SwiftUI
+import PDFKit
 import ReadiumShared
 
 @MainActor
@@ -132,8 +133,25 @@ class BookStore: ObservableObject {
 
         try await Self.coordinatedCopy(from: sourceURL, to: stagedURL)
 
-        let publication = try await ReadiumService.shared.openPublication(at: stagedURL)
-        let parsed = EPUBParserService.shared.parseMetadata(from: stagedURL, publication: publication)
+        let title: String?
+        let author: String?
+        switch BookFormat(fileName: fileName) {
+        case .pdf:
+            guard let document = PDFDocument(url: stagedURL) else {
+                throw PDFError.invalidFile
+            }
+            guard !document.isLocked else {
+                throw PDFError.passwordProtected
+            }
+            let parsed = PDFParserService.shared.parseMetadata(from: document)
+            title = parsed.title
+            author = parsed.author
+        case .epub:
+            let publication = try await ReadiumService.shared.openPublication(at: stagedURL)
+            let parsed = EPUBParserService.shared.parseMetadata(from: stagedURL, publication: publication)
+            title = parsed.title
+            author = parsed.author
+        }
 
         let destURL = booksDirectoryURL.appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: destURL.path) {
@@ -144,8 +162,8 @@ class BookStore: ObservableObject {
 
         let book = BookMetadata(
             id: UUID(),
-            title: parsed.title ?? fileName.replacingOccurrences(of: ".epub", with: ""),
-            author: parsed.author ?? "Unknown Author",
+            title: title ?? BookMetadata.fallbackTitle(forFileName: fileName),
+            author: author ?? "Unknown Author",
             fileName: fileName,
             dateAdded: Date()
         )
@@ -189,7 +207,17 @@ class BookStore: ObservableObject {
         try? FileManager.default.removeItem(at: book.fileURL)
         defaults.removeObject(forKey: "position_\(book.id.uuidString)")
         defaults.removeObject(forKey: "highlights_\(book.id.uuidString)")
+        defaults.removeObject(forKey: "pdfPage_\(book.id.uuidString)")
+        defaults.removeObject(forKey: "locator_\(book.id.uuidString)")
         saveBooks()
+    }
+
+    func savePDFPage(bookId: UUID, pageIndex: Int) {
+        defaults.set(pageIndex, forKey: "pdfPage_\(bookId.uuidString)")
+    }
+
+    func getPDFPage(bookId: UUID) -> Int? {
+        defaults.object(forKey: "pdfPage_\(bookId.uuidString)") as? Int
     }
 
     func saveReadingPosition(bookId: UUID, position: ReadingPosition) {

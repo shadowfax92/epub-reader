@@ -31,7 +31,7 @@ struct LibraryView: View {
         }
         .fileImporter(
             isPresented: $showFilePicker,
-            allowedContentTypes: EPUBImport.allowedContentTypes,
+            allowedContentTypes: EPUBImport.allowedContentTypes + [.pdf],
             allowsMultipleSelection: false
         ) { result in
             handleFileImport(result)
@@ -57,7 +57,7 @@ struct LibraryView: View {
             Text("No Books")
                 .font(.title2)
                 .fontWeight(.medium)
-            Text("Import an EPUB from Files")
+            Text("Import an EPUB or PDF from Files")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Button {
@@ -97,8 +97,14 @@ struct LibraryView: View {
         }
         .listStyle(.plain)
         .navigationDestination(for: BookMetadata.self) { book in
-            ReaderView(book: book)
-                .environmentObject(bookStore)
+            switch book.format {
+            case .epub:
+                ReaderView(book: book)
+                    .environmentObject(bookStore)
+            case .pdf:
+                PDFReaderView(book: book)
+                    .environmentObject(bookStore)
+            }
         }
     }
 

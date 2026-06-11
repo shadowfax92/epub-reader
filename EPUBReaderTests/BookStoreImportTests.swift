@@ -13,6 +13,8 @@ final class BookStoreImportTests: XCTestCase {
         Set((try? FileManager.default.contentsOfDirectory(atPath: booksDirectory.path)) ?? [])
     }
 
+    // MARK: - EPUB
+
     func testImportsExplodedEPUBDirectory() async throws {
         let store = BookStore()
         let dir = try EPUBFixtures.explodedEPUB(named: "Import Me \(UUID().uuidString).epub")
@@ -71,5 +73,42 @@ final class BookStoreImportTests: XCTestCase {
         try await BookStore.coordinatedCopy(from: source, to: destination)
 
         XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "zipped-bytes-stand-in")
+    }
+
+    // MARK: - PDF
+
+    func testImportRejectsPasswordProtectedPDFAndCleansUp() async throws {
+        let url = try PDFTestFixtures.makePDF(pages: ["secret text"], password: "pw")
+        let store = BookStore()
+        let before = booksDirContents()
+
+        do {
+            _ = try await store.importBook(from: url)
+            XCTFail("expected PDFError.passwordProtected")
+        } catch let error as PDFError {
+            XCTAssertEqual(error, .passwordProtected)
+        }
+
+        XCTAssertEqual(booksDirContents(), before, "rejected import must not land in Books/")
+        XCTAssertFalse(store.books.contains { $0.fileName == url.lastPathComponent })
+    }
+
+    func testImportRejectsCorruptPDFAndCleansUp() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("pdf")
+        try Data("this is not a pdf".utf8).write(to: url)
+        let store = BookStore()
+        let before = booksDirContents()
+
+        do {
+            _ = try await store.importBook(from: url)
+            XCTFail("expected PDFError.invalidFile")
+        } catch let error as PDFError {
+            XCTAssertEqual(error, .invalidFile)
+        }
+
+        XCTAssertEqual(booksDirContents(), before)
+        XCTAssertFalse(store.books.contains { $0.fileName == url.lastPathComponent })
     }
 }

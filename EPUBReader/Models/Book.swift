@@ -1,6 +1,14 @@
 import Foundation
 import SwiftUI
 
+enum BookFormat: String {
+    case epub, pdf
+
+    init(fileName: String) {
+        self = fileName.lowercased().hasSuffix(".pdf") ? .pdf : .epub
+    }
+}
+
 struct BookMetadata: Codable, Identifiable, Hashable {
     let id: UUID
     var title: String
@@ -11,6 +19,12 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     var fileURL: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("Books").appendingPathComponent(fileName)
+    }
+
+    var format: BookFormat { BookFormat(fileName: fileName) }
+
+    static func fallbackTitle(forFileName fileName: String) -> String {
+        (fileName as NSString).deletingPathExtension
     }
 }
 
