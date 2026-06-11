@@ -160,29 +160,37 @@ struct LibraryView: View {
         guard !providers.isEmpty else { return false }
         Task {
             var failures: [String] = []
+
+            // Resolve every provider before any import: drop-session providers
+            // go stale shortly after the drop, and importBook can block for
+            // minutes on an iCloud download.
+            var resolved: [BookDropImport.ResolvedItem] = []
             for provider in providers {
                 do {
-                    let item = try await BookDropImport.resolveItem(from: provider)
-                    defer {
-                        if item.needsSecurityScopeRelease {
-                            item.url.stopAccessingSecurityScopedResource()
-                        }
-                        if let tmp = item.ownedTemporaryDirectory {
-                            // Detached: deleting an exploded-EPUB tree
-                            // shouldn't hitch the main actor.
-                            Task.detached(priority: .utility) {
-                                try? FileManager.default.removeItem(at: tmp)
-                            }
-                        }
-                    }
-                    do {
-                        _ = try await bookStore.importBook(from: item.url)
-                    } catch {
-                        failures.append("\(item.url.lastPathComponent): \(error.localizedDescription)")
-                    }
+                    resolved.append(try await BookDropImport.resolveItem(from: provider))
                 } catch {
                     // DropError messages already name the item
                     failures.append(error.localizedDescription)
+                }
+            }
+
+            for item in resolved {
+                defer {
+                    if item.needsSecurityScopeRelease {
+                        item.url.stopAccessingSecurityScopedResource()
+                    }
+                    if let tmp = item.ownedTemporaryDirectory {
+                        // Detached: deleting an exploded-EPUB tree shouldn't
+                        // hitch the main actor.
+                        Task.detached(priority: .utility) {
+                            try? FileManager.default.removeItem(at: tmp)
+                        }
+                    }
+                }
+                do {
+                    _ = try await bookStore.importBook(from: item.url)
+                } catch {
+                    failures.append("\(item.url.lastPathComponent): \(error.localizedDescription)")
                 }
             }
             presentFailures(failures)
@@ -192,7 +200,9 @@ struct LibraryView: View {
 
     private func presentFailures(_ failures: [String]) {
         guard !failures.isEmpty else { return }
-        importError = failures.joined(separator: "\n")
+        let message = failures.joined(separator: "\n")
+        // Append while the alert is up so a second batch can't erase the first
+        importError = showError ? [importError, message].compactMap { $0 }.joined(separator: "\n") : message
         showError = true
     }
 }

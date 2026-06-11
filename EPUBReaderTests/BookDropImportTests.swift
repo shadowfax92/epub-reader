@@ -2,6 +2,8 @@ import XCTest
 import UniformTypeIdentifiers
 @testable import EPUBReader
 
+private struct StubError: Error {}
+
 @MainActor
 final class BookDropImportTests: XCTestCase {
 
@@ -59,7 +61,6 @@ final class BookDropImportTests: XCTestCase {
     }
 
     func testCopyFailureWrapsErrorAndCleansStagingDirectory() async throws {
-        struct StubError: Error {}
         let provider = NSItemProvider()
         provider.registerFileRepresentation(
             forTypeIdentifier: UTType.epub.identifier,
@@ -80,6 +81,40 @@ final class BookDropImportTests: XCTestCase {
             }
         }
         XCTAssertEqual(Self.dropStagingDirectories(), stagingDirsBefore, "failed copy must not leak staging dirs")
+    }
+
+    func testFileURLLoadFailureWithoutFallbackThrowsLoadFailed() async throws {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.fileURL.identifier,
+            visibility: .all
+        ) { completion in
+            completion(nil, StubError())
+            return nil
+        }
+
+        do {
+            _ = try await BookDropImport.resolveItem(from: provider)
+            XCTFail("Expected DropError.loadFailed")
+        } catch let error as BookDropImport.DropError {
+            guard case .loadFailed = error else {
+                return XCTFail("Expected loadFailed, got \(error)")
+            }
+        }
+    }
+
+    func testUnreadableFileURLWithoutFallbackThrowsLoadFailed() async throws {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BookDropImportTests-missing-\(UUID().uuidString).epub")
+
+        do {
+            _ = try await BookDropImport.resolveItem(from: Self.fileURLProvider(for: missing))
+            XCTFail("Expected DropError.loadFailed")
+        } catch let error as BookDropImport.DropError {
+            guard case .loadFailed = error else {
+                return XCTFail("Expected loadFailed, got \(error)")
+            }
+        }
     }
 
     func testUnreadableFileURLFallsBackToCopy() async throws {
@@ -151,7 +186,7 @@ final class BookDropImportTests: XCTestCase {
     private static func dropStagingDirectories() -> Set<String> {
         let tmp = FileManager.default.temporaryDirectory.path
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: tmp)) ?? []
-        return Set(entries.filter { $0.hasPrefix("drop-") })
+        return Set(entries.filter { $0.hasPrefix(BookDropImport.stagingPrefix) })
     }
 
     /// Provider registering only `public.file-url` bytes, like a Finder drag.

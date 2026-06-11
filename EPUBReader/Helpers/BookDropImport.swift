@@ -26,12 +26,15 @@ enum BookDropImport {
 
     enum DropError: LocalizedError {
         case noImportableContent(String)
+        case loadFailed(String, underlying: Error)
         case copyFailed(String, underlying: Error)
 
         var errorDescription: String? {
             switch self {
             case .noImportableContent(let name):
                 return "\(name) isn't an EPUB, PDF, or folder."
+            case .loadFailed(let name, let underlying):
+                return "Couldn't read \(name): \(underlying.localizedDescription)"
             case .copyFailed(let name, let underlying):
                 return "Couldn't copy \(name): \(underlying.localizedDescription)"
             }
@@ -39,19 +42,25 @@ enum BookDropImport {
     }
 
     static func resolveItem(from provider: NSItemProvider) async throws -> ResolvedItem {
-        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
-           let url = try? await loadFileURL(from: provider) {
-            let scoped = url.startAccessingSecurityScopedResource()
-            if FileManager.default.isReadableFile(atPath: url.path) {
-                return ResolvedItem(
-                    url: url,
-                    needsSecurityScopeRelease: scoped,
-                    ownedTemporaryDirectory: nil
-                )
+        var inPlaceFailure: Error?
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            do {
+                let url = try await loadFileURL(from: provider)
+                let scoped = url.startAccessingSecurityScopedResource()
+                if FileManager.default.isReadableFile(atPath: url.path) {
+                    return ResolvedItem(
+                        url: url,
+                        needsSecurityScopeRelease: scoped,
+                        ownedTemporaryDirectory: nil
+                    )
+                }
+                if scoped { url.stopAccessingSecurityScopedResource() }
+                inPlaceFailure = CocoaError(.fileReadNoPermission)
+            } catch {
+                inPlaceFailure = error
             }
-            if scoped { url.stopAccessingSecurityScopedResource() }
         }
-        return try await copyRepresentation(from: provider)
+        return try await copyRepresentation(from: provider, inPlaceFailure: inPlaceFailure)
     }
 
     /// First registered identifier conforming to a copyable book type, so the
@@ -77,14 +86,26 @@ enum BookDropImport {
         }
     }
 
-    private static func copyRepresentation(from provider: NSItemProvider) async throws -> ResolvedItem {
+    /// Prefix of the tmp staging dirs holding materialized copies; exposed so
+    /// tests can assert failed copies don't leak them.
+    nonisolated static let stagingPrefix = "drop-"
+
+    private static func copyRepresentation(
+        from provider: NSItemProvider,
+        inPlaceFailure: Error?
+    ) async throws -> ResolvedItem {
         let name = provider.suggestedName ?? "Dropped item"
         guard let typeIdentifier = copyableTypeIdentifier(for: provider) else {
+            // With no copy fallback, an in-place failure is the real cause —
+            // "isn't an EPUB" would mislabel a book we simply couldn't read.
+            if let inPlaceFailure {
+                throw DropError.loadFailed(name, underlying: inPlaceFailure)
+            }
             throw DropError.noImportableContent(name)
         }
 
         let stagingDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("drop-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("\(stagingPrefix)\(UUID().uuidString)", isDirectory: true)
 
         do {
             try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
