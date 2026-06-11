@@ -52,9 +52,16 @@ final class ReadiumService {
         FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
 
         if isDirectory.boolValue {
+            // Re-derive the URL with a directory hint: callers often build it
+            // via appendingPathComponent (no trailing slash), and resolving a
+            // relative entry like "mimetype" against a slash-less base drops
+            // the last path segment.
+            guard let directoryURL = FileURL(url: URL(fileURLWithPath: fileURL.path, isDirectory: true)) else {
+                throw ReadiumServiceError.invalidURL
+            }
             let container: DirectoryContainer
             do {
-                container = try await DirectoryContainer(directory: fileURL)
+                container = try await DirectoryContainer(directory: directoryURL)
             } catch {
                 throw ReadiumServiceError.openFailed(String(describing: error))
             }
