@@ -68,9 +68,9 @@ enum TTSTimingMapper {
         return timings
     }
 
-    /// Last word whose startTime <= time, via binary search over timings
-    /// sorted by startTime. Nil when time precedes the first word.
-    static func currentWordIndex(timings: [WordTiming], at time: Double) -> Int? {
+    /// Global id of the last word whose startTime <= time, via binary search
+    /// over timings sorted by startTime. Nil when time precedes the first word.
+    static func currentGlobalWordIndex(timings: [WordTiming], at time: Double) -> Int? {
         var lo = 0
         var hi = timings.count
         while lo < hi {

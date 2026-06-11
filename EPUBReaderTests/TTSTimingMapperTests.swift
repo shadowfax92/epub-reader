@@ -98,23 +98,23 @@ final class TTSTimingMapperTests: XCTestCase {
         XCTAssertTrue(TTSTimingMapper.proportionalTimings(words: words, duration: 0).isEmpty)
     }
 
-    // MARK: - currentWordIndex (binary search)
+    // MARK: - currentGlobalWordIndex (binary search)
 
     func testCurrentWordIndexBoundaries() {
         let timings = [WordTiming(globalWordIndex: 5, startTime: 0.0, endTime: 0.4),
                        WordTiming(globalWordIndex: 6, startTime: 0.5, endTime: 0.9),
                        WordTiming(globalWordIndex: 7, startTime: 1.0, endTime: 1.4)]
 
-        XCTAssertNil(TTSTimingMapper.currentWordIndex(timings: timings, at: -0.1))
-        XCTAssertEqual(TTSTimingMapper.currentWordIndex(timings: timings, at: 0.0), 5)
-        XCTAssertEqual(TTSTimingMapper.currentWordIndex(timings: timings, at: 0.45), 5) // gap → earlier word
-        XCTAssertEqual(TTSTimingMapper.currentWordIndex(timings: timings, at: 0.5), 6)
-        XCTAssertEqual(TTSTimingMapper.currentWordIndex(timings: timings, at: 0.7), 6)
-        XCTAssertEqual(TTSTimingMapper.currentWordIndex(timings: timings, at: 99), 7)
+        XCTAssertNil(TTSTimingMapper.currentGlobalWordIndex(timings: timings, at: -0.1))
+        XCTAssertEqual(TTSTimingMapper.currentGlobalWordIndex(timings: timings, at: 0.0), 5)
+        XCTAssertEqual(TTSTimingMapper.currentGlobalWordIndex(timings: timings, at: 0.45), 5) // gap → earlier word
+        XCTAssertEqual(TTSTimingMapper.currentGlobalWordIndex(timings: timings, at: 0.5), 6)
+        XCTAssertEqual(TTSTimingMapper.currentGlobalWordIndex(timings: timings, at: 0.7), 6)
+        XCTAssertEqual(TTSTimingMapper.currentGlobalWordIndex(timings: timings, at: 99), 7)
     }
 
     func testCurrentWordIndexEmpty() {
-        XCTAssertNil(TTSTimingMapper.currentWordIndex(timings: [], at: 0.5))
+        XCTAssertNil(TTSTimingMapper.currentGlobalWordIndex(timings: [], at: 0.5))
     }
 
     // MARK: - Helpers

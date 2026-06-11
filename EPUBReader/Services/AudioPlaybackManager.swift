@@ -139,6 +139,9 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         audioPlayer?.stop()
         audioPlayer = nil
         isPlaying = false
+        // Cancelled tasks leave shared state to the canceller, so clear the
+        // loading flag here for the no-successor (teardown) case.
+        isLoadingAudio = false
         stopSyncTimer()
         // Without this, an in-flight TTS request finishes after the reader
         // closes and starts ghost audio with no UI attached.
@@ -281,10 +284,8 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
             // Cancelled mid-request (reader closed or superseded by a newer
             // play): keep the paid TTS result cached but don't start audio.
-            guard !Task.isCancelled else {
-                isLoadingAudio = false
-                return
-            }
+            // Shared state belongs to the canceller now — touch nothing.
+            guard !Task.isCancelled else { return }
 
             try startPlayback(
                 audioData: audioData,
@@ -300,6 +301,9 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             prefetchTask = Task { await prefetchNext(paragraphIndex: idx + 1) }
 
         } catch {
+            // Cancellation lands here too (URLSession throws URLError.cancelled):
+            // a cancelled task must not stomp the successor play()'s state.
+            guard !Task.isCancelled else { return }
             isLoadingAudio = false
             isPlaying = false
             self.error = error.localizedDescription
@@ -368,7 +372,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         guard let player = audioPlayer, player.isPlaying else { return }
         let currentTime = player.currentTime
 
-        let index = TTSTimingMapper.currentWordIndex(timings: wordTimings, at: currentTime)
+        let index = TTSTimingMapper.currentGlobalWordIndex(timings: wordTimings, at: currentTime)
             ?? wordTimings.first?.globalWordIndex
         if let index, index != currentGlobalWordIndex {
             currentGlobalWordIndex = index
