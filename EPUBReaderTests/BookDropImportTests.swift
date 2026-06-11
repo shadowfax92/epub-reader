@@ -26,6 +26,8 @@ final class BookDropImportTests: XCTestCase {
         let item = try await BookDropImport.resolveItem(from: Self.fileURLProvider(for: fileURL))
         XCTAssertEqual(item.url.standardizedFileURL.path, fileURL.standardizedFileURL.path)
         XCTAssertNil(item.ownedTemporaryDirectory)
+        // needsSecurityScopeRelease is OS-determined for in-place URLs (iOS
+        // reports true even inside the app's own container), so no assertion.
     }
 
     func testExplodedEPUBDirectoryURLResolvesInPlace() async throws {
@@ -53,6 +55,31 @@ final class BookDropImportTests: XCTestCase {
         XCTAssertNotNil(item.ownedTemporaryDirectory)
         XCTAssertNotEqual(item.url.standardizedFileURL.path, fileURL.standardizedFileURL.path)
         XCTAssertEqual(try String(contentsOf: item.url, encoding: .utf8), "epub-bytes")
+        XCTAssertFalse(item.needsSecurityScopeRelease)
+    }
+
+    func testCopyFailureWrapsErrorAndCleansStagingDirectory() async throws {
+        struct StubError: Error {}
+        let provider = NSItemProvider()
+        provider.registerFileRepresentation(
+            forTypeIdentifier: UTType.epub.identifier,
+            fileOptions: [],
+            visibility: .all
+        ) { completion in
+            completion(nil, false, StubError())
+            return nil
+        }
+
+        let stagingDirsBefore = Self.dropStagingDirectories()
+        do {
+            _ = try await BookDropImport.resolveItem(from: provider)
+            XCTFail("Expected DropError.copyFailed")
+        } catch let error as BookDropImport.DropError {
+            guard case .copyFailed = error else {
+                return XCTFail("Expected copyFailed, got \(error)")
+            }
+        }
+        XCTAssertEqual(Self.dropStagingDirectories(), stagingDirsBefore, "failed copy must not leak staging dirs")
     }
 
     func testUnreadableFileURLFallsBackToCopy() async throws {
@@ -120,6 +147,12 @@ final class BookDropImportTests: XCTestCase {
     }
 
     // MARK: - Provider helpers
+
+    private static func dropStagingDirectories() -> Set<String> {
+        let tmp = FileManager.default.temporaryDirectory.path
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: tmp)) ?? []
+        return Set(entries.filter { $0.hasPrefix("drop-") })
+    }
 
     /// Provider registering only `public.file-url` bytes, like a Finder drag.
     private static func fileURLProvider(for url: URL) -> NSItemProvider {

@@ -81,6 +81,8 @@ struct LibraryView: View {
                     .clipShape(Capsule())
             }
         }
+        // Fill the window so the drop target isn't just the content cluster
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var bookList: some View {
@@ -166,7 +168,11 @@ struct LibraryView: View {
                             item.url.stopAccessingSecurityScopedResource()
                         }
                         if let tmp = item.ownedTemporaryDirectory {
-                            try? FileManager.default.removeItem(at: tmp)
+                            // Detached: deleting an exploded-EPUB tree
+                            // shouldn't hitch the main actor.
+                            Task.detached(priority: .utility) {
+                                try? FileManager.default.removeItem(at: tmp)
+                            }
                         }
                     }
                     do {

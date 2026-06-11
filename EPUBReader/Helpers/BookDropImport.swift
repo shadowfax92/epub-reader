@@ -11,7 +11,7 @@ enum BookDropImport {
     /// register; the content types cover providers that only offer data.
     nonisolated static let acceptedTypes: [UTType] = [.fileURL, .epub, .pdf, .folder, .package]
 
-    /// Content types worth materializing a copy for, in preference order.
+    /// Content types worth materializing a copy for.
     nonisolated private static let copyableTypes: [UTType] = [.epub, .pdf, .folder, .package]
 
     struct ResolvedItem {
@@ -85,9 +85,9 @@ enum BookDropImport {
 
         let stagingDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("drop-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
 
         do {
+            try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
             let url = try await loadCopy(from: provider, typeIdentifier: typeIdentifier, into: stagingDir)
             return ResolvedItem(url: url, needsSecurityScopeRelease: false, ownedTemporaryDirectory: stagingDir)
         } catch {
