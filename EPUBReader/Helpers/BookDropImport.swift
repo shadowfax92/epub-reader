@@ -43,9 +43,11 @@ enum BookDropImport {
 
     static func resolveItem(from provider: NSItemProvider) async throws -> ResolvedItem {
         var inPlaceFailure: Error?
+        var inPlaceName: String?
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
             do {
                 let url = try await loadFileURL(from: provider)
+                inPlaceName = url.lastPathComponent
                 let scoped = url.startAccessingSecurityScopedResource()
                 if FileManager.default.isReadableFile(atPath: url.path) {
                     return ResolvedItem(
@@ -60,7 +62,11 @@ enum BookDropImport {
                 inPlaceFailure = error
             }
         }
-        return try await copyRepresentation(from: provider, inPlaceFailure: inPlaceFailure)
+        return try await copyRepresentation(
+            from: provider,
+            inPlaceFailure: inPlaceFailure,
+            inPlaceName: inPlaceName
+        )
     }
 
     /// First registered identifier conforming to a copyable book type, so the
@@ -92,9 +98,10 @@ enum BookDropImport {
 
     private static func copyRepresentation(
         from provider: NSItemProvider,
-        inPlaceFailure: Error?
+        inPlaceFailure: Error?,
+        inPlaceName: String?
     ) async throws -> ResolvedItem {
-        let name = provider.suggestedName ?? "Dropped item"
+        let name = inPlaceName ?? provider.suggestedName ?? "Dropped item"
         guard let typeIdentifier = copyableTypeIdentifier(for: provider) else {
             // With no copy fallback, an in-place failure is the real cause —
             // "isn't an EPUB" would mislabel a book we simply couldn't read.

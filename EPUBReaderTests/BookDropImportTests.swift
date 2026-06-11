@@ -41,6 +41,19 @@ final class BookDropImportTests: XCTestCase {
         XCTAssertNil(item.ownedTemporaryDirectory)
     }
 
+    func testReadableFileURLTakesPrecedenceOverFileRepresentation() async throws {
+        let dir = try EPUBFixtures.directory(files: ["book.epub": "epub-bytes"])
+        defer { EPUBFixtures.cleanup(dir) }
+        let fileURL = dir.appendingPathComponent("book.epub")
+
+        let provider = Self.fileURLProvider(for: fileURL)
+        Self.registerFileRepresentation(on: provider, type: .epub, url: fileURL)
+
+        let item = try await BookDropImport.resolveItem(from: provider)
+        XCTAssertEqual(item.url.standardizedFileURL.path, fileURL.standardizedFileURL.path)
+        XCTAssertNil(item.ownedTemporaryDirectory, "in-place URL must win over the copy fallback")
+    }
+
     // MARK: - Copy fallback
 
     func testFileRepresentationOnlyProviderResolvesToOwnedCopy() async throws {

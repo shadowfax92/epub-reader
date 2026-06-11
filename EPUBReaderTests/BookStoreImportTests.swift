@@ -64,6 +64,34 @@ final class BookStoreImportTests: XCTestCase {
         XCTAssertEqual(booksDirContents(), before, "failed import must clean up the copied item")
     }
 
+    func testSameNamedImportsGetDistinctFiles() async throws {
+        let store = BookStore()
+        let name = "Same Name \(UUID().uuidString).epub"
+        let dirA = try EPUBFixtures.explodedEPUB(named: name)
+        let dirB = try EPUBFixtures.explodedEPUB(named: name)
+        defer {
+            EPUBFixtures.cleanup(dirA)
+            EPUBFixtures.cleanup(dirB)
+        }
+
+        let a = try await store.importBook(from: dirA)
+        let b = try await store.importBook(from: dirB)
+        defer {
+            store.removeBook(a)
+            store.removeBook(b)
+        }
+
+        XCTAssertNotEqual(a.fileName, b.fileName, "same-named imports must not share a stored file")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: a.fileURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: b.fileURL.path))
+
+        store.removeBook(a)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: b.fileURL.path),
+            "deleting one entry must not remove the other's file"
+        )
+    }
+
     func testCoordinatedCopyCopiesRegularFile() async throws {
         let dir = try EPUBFixtures.directory(files: ["sample.epub": "zipped-bytes-stand-in"])
         defer { EPUBFixtures.cleanup(dir) }

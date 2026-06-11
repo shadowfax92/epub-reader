@@ -5,8 +5,9 @@ struct LibraryView: View {
     @EnvironmentObject var bookStore: BookStore
     @State private var showFilePicker = false
     @State private var showSettings = false
-    @State private var importError: String?
-    @State private var showError = false
+    /// One entry per failed import batch; the alert drains it front-first so
+    /// a batch landing while the alert is up is never lost.
+    @State private var errorQueue: [String] = []
     @State private var isDropTargeted = false
 
     var body: some View {
@@ -51,11 +52,24 @@ struct LibraryView: View {
                     .environmentObject(bookStore)
             }
         }
-        .alert("Import Error", isPresented: $showError) {
+        .alert("Import Error", isPresented: errorAlertPresented) {
             Button("OK") { }
         } message: {
-            Text(importError ?? "Unknown error")
+            Text(errorQueue.first ?? "Unknown error")
         }
+    }
+
+    /// Presented while the queue is non-empty; dismissal pops the front entry
+    /// and SwiftUI re-presents for the next one.
+    private var errorAlertPresented: Binding<Bool> {
+        Binding(
+            get: { !errorQueue.isEmpty },
+            set: { presented in
+                if !presented, !errorQueue.isEmpty {
+                    errorQueue.removeFirst()
+                }
+            }
+        )
     }
 
     private var emptyState: some View {
@@ -151,8 +165,7 @@ struct LibraryView: View {
             }
 
         case .failure(let error):
-            importError = error.localizedDescription
-            showError = true
+            errorQueue.append(error.localizedDescription)
         }
     }
 
@@ -200,9 +213,6 @@ struct LibraryView: View {
 
     private func presentFailures(_ failures: [String]) {
         guard !failures.isEmpty else { return }
-        let message = failures.joined(separator: "\n")
-        // Append while the alert is up so a second batch can't erase the first
-        importError = showError ? [importError, message].compactMap { $0 }.joined(separator: "\n") : message
-        showError = true
+        errorQueue.append(failures.joined(separator: "\n"))
     }
 }
