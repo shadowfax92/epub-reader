@@ -11,19 +11,47 @@ enum TTSHighlightHelper {
         return cleanA.hasSuffix("/" + cleanB) || cleanB.hasSuffix("/" + cleanA)
     }
 
-    /// Builds context text for the word at `wordPosition` in the given word array.
-    /// Uses ALL words in the paragraph as context for reliable TextQuoteAnchor matching.
+    /// Builds the TextQuoteAnchor context for the word at `wordPosition`,
+    /// capped at `maxContextChars` per side. Readium's Hypothesis matcher
+    /// similarity-scores every candidate occurrence of the highlight against
+    /// the full prefix/suffix, so full-paragraph contexts cost
+    /// O(candidates × paragraph length) in the WKWebView per spoken word.
+    /// Exact char slices (not word-aligned) mirror how the scorer slices
+    /// document text by length.
     static func buildTextContext(
         words: [BookWord],
-        wordPosition: Int
+        wordPosition: Int,
+        maxContextChars: Int = 64
     ) -> (before: String?, highlight: String, after: String?) {
         guard wordPosition >= 0, wordPosition < words.count else {
             return (nil, "", nil)
         }
 
         let highlight = words[wordPosition].text
-        let beforeText = words.prefix(wordPosition).map(\.text).joined(separator: " ")
-        let afterText = words.dropFirst(wordPosition + 1).map(\.text).joined(separator: " ")
+
+        // Collect only enough neighbor words to cover the cap, so cost is
+        // O(maxContextChars), not O(paragraph).
+        var beforeParts: [String] = []
+        var beforeLength = 0
+        var index = wordPosition - 1
+        while index >= 0 && beforeLength <= maxContextChars {
+            let text = words[index].text
+            beforeParts.append(text)
+            beforeLength += text.count + 1
+            index -= 1
+        }
+        let beforeText = String(beforeParts.reversed().joined(separator: " ").suffix(maxContextChars))
+
+        var afterParts: [String] = []
+        var afterLength = 0
+        index = wordPosition + 1
+        while index < words.count && afterLength <= maxContextChars {
+            let text = words[index].text
+            afterParts.append(text)
+            afterLength += text.count + 1
+            index += 1
+        }
+        let afterText = String(afterParts.joined(separator: " ").prefix(maxContextChars))
 
         return (
             before: beforeText.isEmpty ? nil : beforeText,
