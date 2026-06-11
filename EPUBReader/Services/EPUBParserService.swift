@@ -250,11 +250,13 @@ private class HTMLTextExtractor: NSObject, XMLParserDelegate {
 
 enum EPUBError: LocalizedError {
     case invalidFile
+    case notAnEPUB
     case parsingFailed
 
     var errorDescription: String? {
         switch self {
         case .invalidFile: return "Could not open this EPUB file."
+        case .notAnEPUB: return "The selected folder is not an EPUB book."
         case .parsingFailed: return "Failed to parse the EPUB content."
         }
     }

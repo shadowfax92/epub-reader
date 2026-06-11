@@ -31,7 +31,7 @@ struct LibraryView: View {
         }
         .fileImporter(
             isPresented: $showFilePicker,
-            allowedContentTypes: [UTType(filenameExtension: "epub") ?? UTType("org.idpf.epub-container") ?? .data],
+            allowedContentTypes: EPUBImport.allowedContentTypes,
             allowsMultipleSelection: false
         ) { result in
             handleFileImport(result)

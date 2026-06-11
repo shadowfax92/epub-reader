@@ -108,16 +108,39 @@ class BookStore: ObservableObject {
     }
 
     func importBook(from sourceURL: URL) async throws -> BookMetadata {
-        let fileName = sourceURL.lastPathComponent
-        let destURL = booksDirectoryURL.appendingPathComponent(fileName)
-
-        if FileManager.default.fileExists(atPath: destURL.path) {
-            try FileManager.default.removeItem(at: destURL)
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory),
+           isDirectory.boolValue,
+           !EPUBImport.isExplodedEPUBDirectory(sourceURL) {
+            throw EPUBError.notAnEPUB
         }
-        try FileManager.default.copyItem(at: sourceURL, to: destURL)
 
-        let publication = try await ReadiumService.shared.openPublication(at: destURL)
-        let parsed = EPUBParserService.shared.parseMetadata(from: destURL, publication: publication)
+        let fileName = sourceURL.lastPathComponent
+
+        // Stage in tmp and only install into Books/ after a successful parse:
+        // a mid-copy or parse failure must never leave partial junk in Books/
+        // or delete an existing same-named book's file.
+        let stagingDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("import-\(UUID().uuidString)", isDirectory: true)
+        let stagedURL = stagingDir.appendingPathComponent(fileName)
+        try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+        defer {
+            // Detached: on the failure path this deletes a fully staged book,
+            // which shouldn't hitch the main actor.
+            Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: stagingDir) }
+        }
+
+        try await Self.coordinatedCopy(from: sourceURL, to: stagedURL)
+
+        let publication = try await ReadiumService.shared.openPublication(at: stagedURL)
+        let parsed = EPUBParserService.shared.parseMetadata(from: stagedURL, publication: publication)
+
+        let destURL = booksDirectoryURL.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            _ = try FileManager.default.replaceItemAt(destURL, withItemAt: stagedURL)
+        } else {
+            try FileManager.default.moveItem(at: stagedURL, to: destURL)
+        }
 
         let book = BookMetadata(
             id: UUID(),
@@ -130,6 +153,35 @@ class BookStore: ObservableObject {
         books.insert(book, at: 0)
         saveBooks()
         return book
+    }
+
+    /// Coordinated read before copying picker items into the sandbox. The
+    /// system materializes the coordinated item itself; folder children are
+    /// best-effort (an evicted child fails the copy with a clear error and the
+    /// user can retry after downloading in Files). Runs on a GCD queue because
+    /// coordination blocks its thread — possibly for a long download — which
+    /// neither the main actor nor the cooperative pool should absorb.
+    nonisolated static func coordinatedCopy(from source: URL, to destination: URL) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var coordinatorError: NSError?
+                var copyError: Error?
+                NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinatorError) { url in
+                    do {
+                        try FileManager.default.copyItem(at: url, to: destination)
+                    } catch {
+                        copyError = error
+                    }
+                }
+                if let coordinatorError {
+                    continuation.resume(throwing: coordinatorError)
+                } else if let copyError {
+                    continuation.resume(throwing: copyError)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
     }
 
     func removeBook(_ book: BookMetadata) {
