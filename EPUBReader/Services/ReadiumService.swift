@@ -31,11 +31,7 @@ final class ReadiumService {
             throw ReadiumServiceError.invalidURL
         }
 
-        let asset: Asset
-        switch await assetRetriever.retrieve(url: fileURL) {
-        case .success(let a): asset = a
-        case .failure(let error): throw ReadiumServiceError.openFailed(String(describing: error))
-        }
+        let asset = try await retrieveAsset(for: fileURL)
 
         let publication: Publication
         switch await publicationOpener.open(asset: asset, allowUserInteraction: false) {
@@ -44,6 +40,41 @@ final class ReadiumService {
         }
 
         return publication
+    }
+
+    /// Resolves a file or exploded-EPUB directory into a Readium asset.
+    /// AssetRetriever only handles regular files; directories must be wrapped
+    /// in a DirectoryContainer ourselves, with an EPUB hint because the
+    /// hint-less sniffer requires a `mimetype` entry that some exploded
+    /// EPUBs lack.
+    private nonisolated func retrieveAsset(for fileURL: FileURL) async throws -> Asset {
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
+
+        if isDirectory.boolValue {
+            // Re-derive the URL with a directory hint: callers often build it
+            // via appendingPathComponent (no trailing slash), and resolving a
+            // relative entry like "mimetype" against a slash-less base drops
+            // the last path segment.
+            guard let directoryURL = FileURL(path: fileURL.path, isDirectory: true) else {
+                throw ReadiumServiceError.invalidURL
+            }
+            let container: DirectoryContainer
+            do {
+                container = try await DirectoryContainer(directory: directoryURL)
+            } catch {
+                throw ReadiumServiceError.openFailed(String(describing: error))
+            }
+            switch await assetRetriever.retrieve(container: container, hints: FormatHints(mediaType: .epub)) {
+            case .success(let asset): return asset
+            case .failure(let error): throw ReadiumServiceError.openFailed(String(describing: error))
+            }
+        }
+
+        switch await assetRetriever.retrieve(url: fileURL) {
+        case .success(let asset): return asset
+        case .failure(let error): throw ReadiumServiceError.openFailed(String(describing: error))
+        }
     }
 
     func makeNavigator(

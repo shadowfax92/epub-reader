@@ -25,7 +25,7 @@ A simple iOS app that reads EPUB books out loud using [ElevenLabs](https://eleve
 ## 🔑 You Need
 
 1. **A Mac with Xcode 16+**
-2. **An iPhone running iOS 17+**
+2. **An iPhone running iOS 17+** — or just your Apple Silicon Mac (see [Install on Your Mac](#-install-on-your-mac))
 3. **An ElevenLabs API key** — [get one here](https://elevenlabs.io) (free tier works)
 
 That's it.
@@ -69,6 +69,36 @@ open EPUBReader.xcodeproj
 - Open the app → tap the ⚙️ gear icon
 - Paste your API key
 - Tap **Load Voices** and pick one you like
+
+---
+
+## 💻 Install on Your Mac
+
+Apple Silicon Macs run the iOS app natively — no separate Mac version, no extra setup beyond
+what the iPhone flow already needs.
+
+```sh
+brew install xcodegen    # if you don't have it
+make install-mac
+```
+
+The app lands in `/Applications` (or `~/Applications` if that's not writable). Launch it from
+Spotlight, or:
+
+```sh
+open /Applications/EPUBReader.app
+```
+
+Other targets: `make build-mac` (build without installing) · `make clean` (drop local build artifacts).
+
+> 🍎 Requires an Apple Silicon Mac (M1 or later) with Xcode signed into your Apple ID
+> (**Xcode → Settings → Accounts** — free account works). The install reuses your existing
+> development certificate and provisioning profile automatically. If it reports that no profile
+> covers your Mac, open this project in Xcode, pick your team, and run it once with destination
+> **My Mac (Designed for iPad)** — free accounts get per-app profiles, so it must be this project —
+> and retry. With a free account the profile expires after ~7 days (same as the iPhone flow) — if
+> the Mac app stops opening, build once from Xcode to refresh it, then `make install-mac` again.
+> Intel Macs can't run iOS apps.
 
 ---
 

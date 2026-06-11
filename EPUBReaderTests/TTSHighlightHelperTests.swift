@@ -56,25 +56,37 @@ final class TTSHighlightHelperTests: XCTestCase {
         XCTAssertEqual(ctx.after, "fox jumped")
     }
 
-    func testFullParagraphContextUsedNotJustEightWords() {
-        // This is the critical test: with a long paragraph, ALL words should be included
-        // in context, not just 8. The old code used .suffix(8) / .prefix(8).
+    func testContextCappedAt64CharsExactSlice() {
+        // Deliberate change from full-paragraph context: Readium anchors via
+        // Hypothesis match-quote, which similarity-scores EVERY candidate
+        // occurrence of the highlighted word against the full prefix/suffix —
+        // full paragraphs made each word highlight O(candidates × paragraph
+        // length) in the WKWebView. 64 chars ≈ 10-12 words still disambiguates.
+        // Exact char slices (not word-aligned) mirror how the scorer slices
+        // document text by length.
         let wordTexts = (0..<50).map { "word\($0)" }
         let words = makeWords(wordTexts)
 
         let ctx = TTSHighlightHelper.buildTextContext(words: words, wordPosition: 25)
 
-        // Before should contain ALL 25 preceding words, not just 8
-        let beforeWords = ctx.before!.components(separatedBy: " ")
-        XCTAssertEqual(beforeWords.count, 25)
-        XCTAssertEqual(beforeWords.first, "word0")
-        XCTAssertEqual(beforeWords.last, "word24")
+        let fullBefore = wordTexts.prefix(25).joined(separator: " ")
+        let fullAfter = wordTexts.suffix(from: 26).joined(separator: " ")
+        XCTAssertEqual(ctx.before, String(fullBefore.suffix(64)))
+        XCTAssertEqual(ctx.after, String(fullAfter.prefix(64)))
+        XCTAssertLessThanOrEqual(ctx.before?.count ?? 0, 64)
+        XCTAssertLessThanOrEqual(ctx.after?.count ?? 0, 64)
+    }
 
-        // After should contain ALL 24 following words, not just 8
-        let afterWords = ctx.after!.components(separatedBy: " ")
-        XCTAssertEqual(afterWords.count, 24)
-        XCTAssertEqual(afterWords.first, "word26")
-        XCTAssertEqual(afterWords.last, "word49")
+    func testRepeatedWordStillDisambiguatedWithinCap() {
+        let texts = ["alpha", "beta", "gamma", "the", "delta", "epsilon", "zeta", "the", "eta", "theta"]
+        let words = makeWords(texts)
+
+        let first = TTSHighlightHelper.buildTextContext(words: words, wordPosition: 3)
+        let second = TTSHighlightHelper.buildTextContext(words: words, wordPosition: 7)
+
+        XCTAssertEqual(first.highlight, second.highlight)
+        XCTAssertNotEqual(first.before, second.before)
+        XCTAssertNotEqual(first.after, second.after)
     }
 
     func testContextWithCommonWord() {

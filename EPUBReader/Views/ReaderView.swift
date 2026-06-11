@@ -64,15 +64,13 @@ struct ReaderView: View {
         .task { await loadBook() }
         .onDisappear {
             playbackManager.stop()
+            playbackManager.clearCallbacks()
         }
         .onChange(of: playbackManager.isPlaying) { _, playing in
             if playing {
                 scheduleHideControls()
                 updateWordHighlight() // resume keeps the word index unchanged, so onChange alone won't fire
             }
-        }
-        .onChange(of: playbackManager.currentGlobalWordIndex) { _, _ in
-            updateWordHighlight()
         }
         .onChange(of: bookStore.readerTheme) { _, newTheme in
             applyThemeToNavigator(newTheme)
@@ -316,7 +314,7 @@ struct ReaderView: View {
     private var currentChapterIndex: Int {
         guard let parsedBook else { return -1 }
         let currentParaId = playbackManager.currentParagraphId
-        return parsedBook.flatParagraphs.first(where: { $0.id == currentParaId })?.chapterIndex ?? -1
+        return parsedBook.paragraph(withId: currentParaId)?.chapterIndex ?? -1
     }
 
     // MARK: - Actions
@@ -327,6 +325,11 @@ struct ReaderView: View {
             publication = pub
 
             let parsed = try await EPUBParserService.shared.parseBook(from: book, publication: pub)
+            // Last suspension point: everything below runs synchronously on the
+            // MainActor, so this single check closes the race where a dismissed
+            // view's loadBook re-registers callbacks onDisappear just cleared
+            // (recreating the manager↔view retain cycle with nothing to break it).
+            guard !Task.isCancelled else { return }
             parsedBook = parsed
 
             playbackManager.setBook(paragraphs: parsed.flatParagraphs)
@@ -382,7 +385,8 @@ struct ReaderView: View {
             nav.delegate = delegate
             navigatorDelegate = delegate
 
-            if let position = bookStore.getReadingPosition(bookId: book.id) {
+            let savedPosition = bookStore.getReadingPosition(bookId: book.id)
+            if let position = savedPosition {
                 let paraIdx = min(position.paragraphIndex, parsed.flatParagraphs.count - 1)
                 if paraIdx >= 0 {
                     let para = parsed.flatParagraphs[paraIdx]
@@ -399,7 +403,13 @@ struct ReaderView: View {
 
             navigator = nav
             isLoading = false
+            playbackManager.onWordChange = { [self] in
+                updateWordHighlight()
+            }
             applyHighlightDecorations()
+            if savedPosition != nil {
+                updateWordHighlight()
+            }
         } catch {
             loadError = error.localizedDescription
             isLoading = false
@@ -511,14 +521,12 @@ struct ReaderView: View {
         let wordIndex = playbackManager.currentGlobalWordIndex
         let paraId = playbackManager.currentParagraphId
 
-        guard let paragraph = parsedBook.flatParagraphs.first(where: { $0.id == paraId }),
-              paragraph.words.contains(where: { $0.id == wordIndex }),
+        guard let paragraph = parsedBook.paragraph(withId: paraId),
+              let wordPosition = paragraph.position(ofGlobalWordId: wordIndex),
               let hrefURL = AnyURL(string: paragraph.resourceHref) else {
             nav.apply(decorations: [], in: "tts")
             return
         }
-
-        let wordPosition = paragraph.words.firstIndex(where: { $0.id == wordIndex }) ?? 0
         let ctx = TTSHighlightHelper.buildTextContext(words: paragraph.words, wordPosition: wordPosition)
 
         let locator = Locator(
@@ -537,10 +545,6 @@ struct ReaderView: View {
             style: .highlight(tint: .systemBlue, isActive: true)
         )
 
-        #if DEBUG
-        print("[TTS-HL] word='\(ctx.highlight)' para=\(paraId) href=\(paragraph.resourceHref) before=\(ctx.before?.count ?? 0)ch after=\(ctx.after?.count ?? 0)ch")
-        #endif
-
         nav.apply(decorations: [decoration], in: "tts")
 
         // Only navigate when the resource (chapter) changes — no auto-scrolling
@@ -558,10 +562,10 @@ struct ReaderView: View {
         let paraId = playbackManager.currentParagraphId
         let wordIndex = playbackManager.currentGlobalWordIndex
 
-        guard let paragraph = parsedBook.flatParagraphs.first(where: { $0.id == paraId }),
+        guard let paragraph = parsedBook.paragraph(withId: paraId),
               let hrefURL = AnyURL(string: paragraph.resourceHref) else { return }
 
-        let wordPosition = paragraph.words.firstIndex(where: { $0.id == wordIndex }) ?? 0
+        let wordPosition = paragraph.position(ofGlobalWordId: wordIndex) ?? 0
         let ctx = TTSHighlightHelper.buildTextContext(words: paragraph.words, wordPosition: wordPosition)
 
         let locator = Locator(

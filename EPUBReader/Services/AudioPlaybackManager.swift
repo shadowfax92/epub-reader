@@ -20,6 +20,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     private var prefetchedTimings: [WordTiming]?
     private var prefetchedIndex: Int?
     private var prefetchTask: Task<Void, Never>?
+    private var playTask: Task<Void, Never>?
 
     // Cache generated audio to avoid re-spending credits on replayed paragraphs
     private var audioCache: [Int: CachedAudio] = [:]
@@ -34,10 +35,17 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
     private var onPositionUpdate: ((ReadingPosition) -> Void)?
 
-    struct WordTiming {
-        let globalWordIndex: Int
-        let startTime: Double
-        let endTime: Double
+    /// Fires on word boundaries straight from the sync timer so the decoration
+    /// applies without waiting on a SwiftUI onChange view-update hop; consumers
+    /// read the published word/paragraph state, which is set before each fire.
+    var onWordChange: (() -> Void)?
+
+    /// Break the manager→closure→view retain cycle when the reader closes:
+    /// both callbacks capture the view copy, whose StateObject storage
+    /// strongly retains this manager.
+    func clearCallbacks() {
+        onWordChange = nil
+        onPositionUpdate = nil
     }
 
     private struct CachedAudio {
@@ -84,13 +92,12 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         stopSyncTimer()
 
         currentParagraphArrayIndex = index
-        Task { await generateAndPlay(paragraphIndex: index, startFromWordGlobal: wordIndex) }
+        playTask?.cancel()
+        playTask = Task { await generateAndPlay(paragraphIndex: index, startFromWordGlobal: wordIndex) }
     }
 
     func playFromGlobalWord(_ globalWordIndex: Int) {
-        guard let paragraphIndex = allParagraphs.firstIndex(where: { paragraph in
-            paragraph.words.contains(where: { $0.id == globalWordIndex })
-        }) else { return }
+        guard let paragraphIndex = allParagraphs.indexOfParagraph(containingWordId: globalWordIndex) else { return }
         play(fromParagraphIndex: paragraphIndex, wordIndex: globalWordIndex)
     }
 
@@ -142,7 +149,13 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         audioPlayer?.stop()
         audioPlayer = nil
         isPlaying = false
+        // Cancelled tasks leave shared state to the canceller, so clear the
+        // loading flag here for the no-successor (teardown) case.
+        isLoadingAudio = false
         stopSyncTimer()
+        // Without this, an in-flight TTS request finishes after the reader
+        // closes and starts ghost audio with no UI attached.
+        playTask?.cancel()
         prefetchTask?.cancel()
         prefetchedAudio = nil
         prefetchedTimings = nil
@@ -194,6 +207,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     }
 
     private func generateAndPlay(paragraphIndex: Int, startFromWordGlobal: Int = 0) async {
+        guard !Task.isCancelled else { return }
         var idx = paragraphIndex
 
         while idx < allParagraphs.count {
@@ -278,6 +292,11 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
             cacheAudio(audioData: audioData, timings: timings, paragraphId: paragraph.id)
 
+            // Cancelled mid-request (reader closed or superseded by a newer
+            // play): keep the paid TTS result cached but don't start audio.
+            // Shared state belongs to the canceller now — touch nothing.
+            guard !Task.isCancelled else { return }
+
             try startPlayback(
                 audioData: audioData,
                 timings: timings,
@@ -292,6 +311,9 @@ class AudioPlaybackManager: NSObject, ObservableObject {
             prefetchTask = Task { await prefetchNext(paragraphIndex: idx + 1) }
 
         } catch {
+            // Cancellation lands here too (URLSession throws URLError.cancelled):
+            // a cancelled task must not stomp the successor play()'s state.
+            guard !Task.isCancelled else { return }
             isLoadingAudio = false
             isPlaying = false
             self.error = error.localizedDescription
@@ -325,6 +347,9 @@ class AudioPlaybackManager: NSObject, ObservableObject {
 
         if let firstWord = allParagraphs[paragraphIndex].words.first {
             currentGlobalWordIndex = startFromWordGlobal > 0 ? startFromWordGlobal : firstWord.id
+            // Unconditional fire: resuming on the same word produces no
+            // index change, but the decoration still needs an initial draw.
+            onWordChange?()
         }
 
         audioPlayer?.play()
@@ -332,49 +357,20 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         startSyncTimer()
     }
 
-    private func mapCharacterTimingsToWords(alignment: ElevenLabsService.TTSAlignment?, words: [BookWord]) -> [WordTiming] {
-        guard let alignment = alignment,
-              !alignment.character_start_times_seconds.isEmpty else {
-            return []
-        }
-
-        let charCount = alignment.character_start_times_seconds.count
-        var timings: [WordTiming] = []
-        var charIndex = 0
-
-        for word in words {
-            let wordLength = word.text.count
-            guard charIndex < charCount else { break }
-
-            let startTime = alignment.character_start_times_seconds[charIndex]
-            let endCharIndex = min(charIndex + wordLength - 1, charCount - 1)
-            let endTime = alignment.character_end_times_seconds[min(endCharIndex, alignment.character_end_times_seconds.count - 1)]
-
-            timings.append(WordTiming(
-                globalWordIndex: word.id,
-                startTime: startTime,
-                endTime: endTime
-            ))
-
-            charIndex += wordLength + 1
-            while charIndex < charCount && charIndex > 0 {
-                let chars = alignment.characters
-                if charIndex >= chars.count { break }
-                if chars[charIndex - 1] == " " { break }
-                charIndex += 1
-            }
-        }
-
-        return timings
-    }
-
     private func startSyncTimer() {
         stopSyncTimer()
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
+        // .common keeps ticks flowing while the WKWebView scroll view is
+        // tracking — .default-mode timers pause and the highlight freezes
+        // mid-scroll. assumeIsolated (valid: main-run-loop timers fire on the
+        // main thread) avoids allocating a Task per tick.
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
                 self?.updateHighlight()
             }
         }
+        timer.tolerance = 0.005
+        RunLoop.main.add(timer, forMode: .common)
+        syncTimer = timer
     }
 
     private func stopSyncTimer() {
@@ -386,12 +382,11 @@ class AudioPlaybackManager: NSObject, ObservableObject {
         guard let player = audioPlayer, player.isPlaying else { return }
         let currentTime = player.currentTime
 
-        if let timing = wordTimings.last(where: { $0.startTime <= currentTime }) {
-            if timing.globalWordIndex != currentGlobalWordIndex {
-                currentGlobalWordIndex = timing.globalWordIndex
-            }
-        } else if let first = wordTimings.first {
-            currentGlobalWordIndex = first.globalWordIndex
+        let index = TTSTimingMapper.currentGlobalWordIndex(timings: wordTimings, at: currentTime)
+            ?? wordTimings.first?.globalWordIndex
+        if let index, index != currentGlobalWordIndex {
+            currentGlobalWordIndex = index
+            onWordChange?()
         }
     }
 
@@ -454,7 +449,8 @@ class AudioPlaybackManager: NSObject, ObservableObject {
                 isPlaying = false
             }
         } else {
-            Task { await generateAndPlay(paragraphIndex: nextIndex) }
+            playTask?.cancel()
+            playTask = Task { await generateAndPlay(paragraphIndex: nextIndex) }
         }
     }
 
@@ -500,8 +496,15 @@ class AudioPlaybackManager: NSObject, ObservableObject {
                 previousText: paragraphText(at: paragraphIndex - 1),
                 nextText: paragraphText(at: paragraphIndex + 1)
             )
-            let timings = mapCharacterTimingsToWords(
-                alignment: response.normalized_alignment ?? response.alignment,
+            // Raw alignment's characters match the input text exactly;
+            // normalized_alignment expands numbers/abbreviations and drifts.
+            let alignment = [response.alignment, response.normalized_alignment]
+                .compactMap { $0 }
+                .first { !$0.characters.isEmpty }
+            let timings = TTSTimingMapper.mapAlignment(
+                characters: alignment?.characters ?? [],
+                startTimes: alignment?.character_start_times_seconds ?? [],
+                endTimes: alignment?.character_end_times_seconds ?? [],
                 words: words
             )
             guard let audioData = Data(base64Encoded: response.audio_base64) else {
@@ -521,32 +524,8 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     }
 
     private func estimateWordTimings(words: [BookWord], audioData: Data) -> [WordTiming] {
-        guard !words.isEmpty else { return [] }
-
         guard let tempPlayer = try? AVAudioPlayer(data: audioData) else { return [] }
-        let duration = tempPlayer.duration
-
-        let totalCharsWithSpaces = words.reduce(0) { $0 + $1.text.count } + max(0, words.count - 1)
-        guard totalCharsWithSpaces > 0, duration > 0 else { return [] }
-
-        let timePerChar = duration / Double(totalCharsWithSpaces)
-        var timings: [WordTiming] = []
-        var currentTime: Double = 0
-
-        for (i, word) in words.enumerated() {
-            let wordDuration = Double(word.text.count) * timePerChar
-            timings.append(WordTiming(
-                globalWordIndex: word.id,
-                startTime: currentTime,
-                endTime: currentTime + wordDuration
-            ))
-            currentTime += wordDuration
-            if i < words.count - 1 {
-                currentTime += timePerChar
-            }
-        }
-
-        return timings
+        return TTSTimingMapper.proportionalTimings(words: words, duration: tempPlayer.duration)
     }
 
     private func saveCurrentPosition() {
