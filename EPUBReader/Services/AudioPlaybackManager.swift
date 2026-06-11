@@ -72,9 +72,7 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     }
 
     func playFromGlobalWord(_ globalWordIndex: Int) {
-        guard let paragraphIndex = allParagraphs.firstIndex(where: { paragraph in
-            paragraph.words.contains(where: { $0.id == globalWordIndex })
-        }) else { return }
+        guard let paragraphIndex = allParagraphs.indexOfParagraph(containingWordId: globalWordIndex) else { return }
         play(fromParagraphIndex: paragraphIndex, wordIndex: globalWordIndex)
     }
 

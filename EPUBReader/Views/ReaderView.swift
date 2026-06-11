@@ -366,7 +366,7 @@ struct ReaderView: View {
     private var currentChapterIndex: Int {
         guard let parsedBook else { return -1 }
         let currentParaId = playbackManager.currentParagraphId
-        return parsedBook.flatParagraphs.first(where: { $0.id == currentParaId })?.chapterIndex ?? -1
+        return parsedBook.paragraph(withId: currentParaId)?.chapterIndex ?? -1
     }
 
     // MARK: - Actions
@@ -556,14 +556,12 @@ struct ReaderView: View {
         let wordIndex = playbackManager.currentGlobalWordIndex
         let paraId = playbackManager.currentParagraphId
 
-        guard let paragraph = parsedBook.flatParagraphs.first(where: { $0.id == paraId }),
-              paragraph.words.contains(where: { $0.id == wordIndex }),
+        guard let paragraph = parsedBook.paragraph(withId: paraId),
+              let wordPosition = paragraph.position(ofGlobalWordId: wordIndex),
               let hrefURL = AnyURL(string: paragraph.resourceHref) else {
             nav.apply(decorations: [], in: "tts")
             return
         }
-
-        let wordPosition = paragraph.words.firstIndex(where: { $0.id == wordIndex }) ?? 0
         let ctx = TTSHighlightHelper.buildTextContext(words: paragraph.words, wordPosition: wordPosition)
 
         let locator = Locator(
@@ -603,10 +601,10 @@ struct ReaderView: View {
         let paraId = playbackManager.currentParagraphId
         let wordIndex = playbackManager.currentGlobalWordIndex
 
-        guard let paragraph = parsedBook.flatParagraphs.first(where: { $0.id == paraId }),
+        guard let paragraph = parsedBook.paragraph(withId: paraId),
               let hrefURL = AnyURL(string: paragraph.resourceHref) else { return }
 
-        let wordPosition = paragraph.words.firstIndex(where: { $0.id == wordIndex }) ?? 0
+        let wordPosition = paragraph.position(ofGlobalWordId: wordIndex) ?? 0
         let ctx = TTSHighlightHelper.buildTextContext(words: paragraph.words, wordPosition: wordPosition)
 
         let locator = Locator(
