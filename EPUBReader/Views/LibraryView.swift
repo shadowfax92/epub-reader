@@ -5,8 +5,10 @@ struct LibraryView: View {
     @EnvironmentObject var bookStore: BookStore
     @State private var showFilePicker = false
     @State private var showSettings = false
-    @State private var importError: String?
-    @State private var showError = false
+    /// One entry per failed import batch; the alert drains it front-first so
+    /// a batch landing while the alert is up is never lost.
+    @State private var errorQueue: [String] = []
+    @State private var isDropTargeted = false
 
     var body: some View {
         Group {
@@ -14,6 +16,14 @@ struct LibraryView: View {
                 emptyState
             } else {
                 bookList
+            }
+        }
+        .onDrop(of: BookDropImport.acceptedTypes, isTargeted: $isDropTargeted) { providers in
+            importDroppedItems(providers)
+        }
+        .overlay {
+            if isDropTargeted {
+                dropTargetOverlay
             }
         }
         .navigationTitle("Library")
@@ -32,7 +42,7 @@ struct LibraryView: View {
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: EPUBImport.allowedContentTypes + [.pdf],
-            allowsMultipleSelection: false
+            allowsMultipleSelection: true
         ) { result in
             handleFileImport(result)
         }
@@ -42,11 +52,24 @@ struct LibraryView: View {
                     .environmentObject(bookStore)
             }
         }
-        .alert("Import Error", isPresented: $showError) {
+        .alert("Import Error", isPresented: errorAlertPresented) {
             Button("OK") { }
         } message: {
-            Text(importError ?? "Unknown error")
+            Text(errorQueue.first ?? "Unknown error")
         }
+    }
+
+    /// Presented while the queue is non-empty; dismissal pops the front entry
+    /// and SwiftUI re-presents for the next one.
+    private var errorAlertPresented: Binding<Bool> {
+        Binding(
+            get: { !errorQueue.isEmpty },
+            set: { presented in
+                if !presented, !errorQueue.isEmpty {
+                    errorQueue.removeFirst()
+                }
+            }
+        )
     }
 
     private var emptyState: some View {
@@ -72,6 +95,8 @@ struct LibraryView: View {
                     .clipShape(Capsule())
             }
         }
+        // Fill the window so the drop target isn't just the content cluster
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var bookList: some View {
@@ -108,25 +133,86 @@ struct LibraryView: View {
         }
     }
 
+    private var dropTargetOverlay: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.tint, style: StrokeStyle(lineWidth: 2, dash: [8]))
+                .padding(8)
+            Label("Drop books to import", systemImage: "arrow.down.doc")
+                .font(.headline)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(.regularMaterial, in: Capsule())
+        }
+        .allowsHitTesting(false)
+    }
+
     private func handleFileImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            guard let url = urls.first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
-
             Task {
-                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                do {
-                    let _ = try await bookStore.importBook(from: url)
-                } catch {
-                    importError = error.localizedDescription
-                    showError = true
+                var failures: [String] = []
+                for url in urls {
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                    do {
+                        _ = try await bookStore.importBook(from: url)
+                    } catch {
+                        failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                    }
                 }
+                presentFailures(failures)
             }
 
         case .failure(let error):
-            importError = error.localizedDescription
-            showError = true
+            errorQueue.append(error.localizedDescription)
         }
+    }
+
+    private func importDroppedItems(_ providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+        Task {
+            var failures: [String] = []
+
+            // Resolve every provider before any import: drop-session providers
+            // go stale shortly after the drop, and importBook can block for
+            // minutes on an iCloud download.
+            var resolved: [BookDropImport.ResolvedItem] = []
+            for provider in providers {
+                do {
+                    resolved.append(try await BookDropImport.resolveItem(from: provider))
+                } catch {
+                    // DropError messages already name the item
+                    failures.append(error.localizedDescription)
+                }
+            }
+
+            for item in resolved {
+                defer {
+                    if item.needsSecurityScopeRelease {
+                        item.url.stopAccessingSecurityScopedResource()
+                    }
+                    if let tmp = item.ownedTemporaryDirectory {
+                        // Detached: deleting an exploded-EPUB tree shouldn't
+                        // hitch the main actor.
+                        Task.detached(priority: .utility) {
+                            try? FileManager.default.removeItem(at: tmp)
+                        }
+                    }
+                }
+                do {
+                    _ = try await bookStore.importBook(from: item.url)
+                } catch {
+                    failures.append("\(item.url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            presentFailures(failures)
+        }
+        return true
+    }
+
+    private func presentFailures(_ failures: [String]) {
+        guard !failures.isEmpty else { return }
+        errorQueue.append(failures.joined(separator: "\n"))
     }
 }

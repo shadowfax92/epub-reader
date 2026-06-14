@@ -4,9 +4,14 @@ import UniformTypeIdentifiers
 /// Rules for what the book-import picker accepts and what counts as an
 /// importable exploded-EPUB folder. `.folder` is required because exploded
 /// EPUBs (directories named `*.epub`) don't conform to the epub file type,
-/// so the picker would grey them out.
+/// so the picker would grey them out. `.package` is required on macOS
+/// (the Mac app is the iOS binary): there a `*.epub` directory resolves to
+/// `com.apple.ibooks.epub`, which conforms to `com.apple.package` but
+/// neither to `.epub` nor `.folder` — folder excludes packages — so the
+/// open panel greys exploded EPUBs out without it. Mis-picked non-book
+/// packages are rejected by `BookStore.importBook`.
 enum EPUBImport {
-    static let allowedContentTypes: [UTType] = [.epub, .folder]
+    static let allowedContentTypes: [UTType] = [.epub, .folder, .package]
 
     /// True when `url` is a directory shaped like an exploded EPUB:
     /// `META-INF/container.xml` present, or a `mimetype` file declaring
