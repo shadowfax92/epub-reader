@@ -6,3 +6,4 @@ DerivedData/
 *.swp
 *.swo
 .llm/
+.grove/
