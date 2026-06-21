@@ -126,7 +126,6 @@ struct PDFKitReaderView: UIViewRepresentable {
         private var currentAnnotations: [PDFAnnotation] = []
         private var lastHighlight: PDFWordHighlight?
         private var lastAutoAdvancePagesWithSpeech: Bool?
-        private var lastNavigatedPageIndex: Int?
         private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
 
         init(onTap: @escaping () -> Void,
@@ -217,7 +216,8 @@ struct PDFKitReaderView: UIViewRepresentable {
             autoAdvancePagesWithSpeech: Bool,
             in pdfView: PDFView
         ) {
-            guard highlight != lastHighlight || autoAdvancePagesWithSpeech != lastAutoAdvancePagesWithSpeech else { return }
+            guard highlight != lastHighlight ||
+                    autoAdvancePagesWithSpeech != lastAutoAdvancePagesWithSpeech else { return }
             lastHighlight = highlight
             lastAutoAdvancePagesWithSpeech = autoAdvancePagesWithSpeech
 
@@ -241,10 +241,9 @@ struct PDFKitReaderView: UIViewRepresentable {
                 currentAnnotations.append(annotation)
             }
 
-            guard autoAdvancePagesWithSpeech, lastNavigatedPageIndex != highlight.pageIndex else { return }
-            lastNavigatedPageIndex = highlight.pageIndex
+            guard autoAdvancePagesWithSpeech, pdfView.currentPage != page else { return }
             let bounds = selection.bounds(for: page)
-            if pdfView.currentPage != page, !bounds.isNull {
+            if !bounds.isNull {
                 pdfView.go(to: bounds.insetBy(dx: -20, dy: -60), on: page)
             }
         }
