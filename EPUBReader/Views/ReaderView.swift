@@ -2,6 +2,8 @@ import SwiftUI
 import ReadiumShared
 import ReadiumNavigator
 
+private let selectionStartErrorMessage = "Could not start from that selection. Try selecting a little more text."
+
 struct ReaderView: View {
     let book: BookMetadata
     @EnvironmentObject var bookStore: BookStore
@@ -434,6 +436,7 @@ struct ReaderView: View {
         )
     }
 
+    /// Toggles playback, treating an active selection as an explicit start request.
     private func handlePlayPause() {
         if playbackManager.isPlaying {
             playbackManager.pause()
@@ -445,17 +448,21 @@ struct ReaderView: View {
             return
         }
 
-        reconfigurePlayback()
-
-        // Check for text selection to start TTS from that point
         if let nav = navigator,
-           let selection = nav.currentSelection,
-           let startPos = findStartFromSelection(selection) {
+           let selection = nav.currentSelection {
+            guard let startPos = findStartFromSelection(selection) else {
+                playbackManager.error = selectionStartErrorMessage
+                return
+            }
+
+            reconfigurePlayback()
             playbackManager.play(fromParagraphIndex: startPos.paragraphIndex, wordIndex: startPos.wordIndex)
             nav.clearSelection()
             hasTextSelection = false
             return
         }
+
+        reconfigurePlayback()
 
         // Clamp: a persisted index can go stale if extraction logic changes across app updates.
         let maxIndex = (parsedBook?.flatParagraphs.count ?? 1) - 1
@@ -465,13 +472,17 @@ struct ReaderView: View {
         playbackManager.play(fromParagraphIndex: paragraphIdx, wordIndex: wordIdx)
     }
 
+    /// Starts narration at a Readium selection or reports why it cannot.
     private func startTTSFromSelection(_ selection: Selection) {
         guard !bookStore.activeApiKey.isEmpty, !bookStore.activeVoiceId.isEmpty else {
             playbackManager.error = "Set your API key and voice in Settings first."
             return
         }
 
-        guard let startPos = findStartFromSelection(selection) else { return }
+        guard let startPos = findStartFromSelection(selection) else {
+            playbackManager.error = selectionStartErrorMessage
+            return
+        }
 
         reconfigurePlayback()
         playbackManager.play(fromParagraphIndex: startPos.paragraphIndex, wordIndex: startPos.wordIndex)
