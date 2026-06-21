@@ -444,14 +444,14 @@ struct ReaderView: View {
         }
 
         if bookStore.activeApiKey.isEmpty || bookStore.activeVoiceId.isEmpty {
-            playbackManager.error = "Set your API key and voice in Settings first."
+            showPlaybackError("Set your API key and voice in Settings first.")
             return
         }
 
         if let nav = navigator,
            let selection = nav.currentSelection {
             guard let startPos = findStartFromSelection(selection) else {
-                playbackManager.error = selectionStartErrorMessage
+                showPlaybackError(selectionStartErrorMessage)
                 return
             }
 
@@ -475,12 +475,12 @@ struct ReaderView: View {
     /// Starts narration at a Readium selection or reports why it cannot.
     private func startTTSFromSelection(_ selection: Selection) {
         guard !bookStore.activeApiKey.isEmpty, !bookStore.activeVoiceId.isEmpty else {
-            playbackManager.error = "Set your API key and voice in Settings first."
+            showPlaybackError("Set your API key and voice in Settings first.")
             return
         }
 
         guard let startPos = findStartFromSelection(selection) else {
-            playbackManager.error = selectionStartErrorMessage
+            showPlaybackError(selectionStartErrorMessage)
             return
         }
 
@@ -498,6 +498,15 @@ struct ReaderView: View {
             hrefString: selection.locator.href.string,
             paragraphs: parsedBook.flatParagraphs
         )
+    }
+
+    /// Shows playback errors even when they originate from the Readium menu.
+    private func showPlaybackError(_ message: String) {
+        hideControlsTask?.cancel()
+        playbackManager.error = message
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showControls = true
+        }
     }
 
     private func navigateToChapter(_ chapter: BookChapter) {

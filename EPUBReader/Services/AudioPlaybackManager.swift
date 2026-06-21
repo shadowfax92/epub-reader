@@ -84,11 +84,11 @@ class AudioPlaybackManager: NSObject, ObservableObject {
     }
 
     func play(fromParagraphIndex index: Int, wordIndex: Int = 0) {
-        // Stop playback but preserve prefetched audio
         saveCurrentPosition()
         audioPlayer?.stop()
         audioPlayer = nil
         isPlaying = false
+        error = nil
         stopSyncTimer()
 
         currentParagraphArrayIndex = index
