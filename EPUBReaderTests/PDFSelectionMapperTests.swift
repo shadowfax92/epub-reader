@@ -1,4 +1,5 @@
 import XCTest
+import PDFKit
 @testable import EPUBReader
 
 final class PDFSelectionMapperTests: XCTestCase {
@@ -171,5 +172,39 @@ final class PDFSelectionMapperTests: XCTestCase {
             wordLocations: locations
         )
         XCTAssertNil(result)
+    }
+
+    @MainActor
+    func testPDFHighlightFollowsSpeechAfterAutoAdvanceReenabled() throws {
+        let url = try PDFTestFixtures.makePDF(pages: ["first page text", "target word on second page"])
+        let document = try XCTUnwrap(PDFDocument(url: url))
+        let firstPage = try XCTUnwrap(document.page(at: 0))
+        let secondPage = try XCTUnwrap(document.page(at: 1))
+        let pageString = try XCTUnwrap(secondPage.string)
+        let range = (pageString as NSString).range(of: "target")
+        XCTAssertNotEqual(range.location, NSNotFound)
+
+        let pdfView = PDFView(frame: CGRect(x: 0, y: 0, width: 612, height: 792))
+        pdfView.displayMode = .singlePage
+        pdfView.document = document
+        pdfView.go(to: firstPage)
+        pdfView.layoutDocumentView()
+
+        let coordinator = PDFKitReaderView.Coordinator(
+            onTap: {},
+            onSelectionChanged: { _ in },
+            onVisiblePageChanged: { _ in }
+        )
+        let highlight = PDFWordHighlight(pageIndex: 1, range: range)
+
+        coordinator.applyHighlight(highlight, autoAdvancePagesWithSpeech: true, in: pdfView)
+        XCTAssertEqual(document.index(for: try XCTUnwrap(pdfView.currentPage)), 1)
+
+        pdfView.go(to: firstPage)
+        coordinator.applyHighlight(highlight, autoAdvancePagesWithSpeech: false, in: pdfView)
+        XCTAssertEqual(document.index(for: try XCTUnwrap(pdfView.currentPage)), 0)
+
+        coordinator.applyHighlight(highlight, autoAdvancePagesWithSpeech: true, in: pdfView)
+        XCTAssertEqual(document.index(for: try XCTUnwrap(pdfView.currentPage)), 1)
     }
 }

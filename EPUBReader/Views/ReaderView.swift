@@ -22,9 +22,12 @@ struct ReaderView: View {
     @State private var showSettings = false
     @State private var showHighlights = false
     @State private var navigatorDelegate: ReaderNavigatorDelegate?
-    @State private var lastScrolledResourceHref: String?
     @State private var hasTextSelection = false
     @State private var navigationTask: Task<Void, Never>?
+    @State private var positionsByResourceHref: [String: [Int?]] = [:]
+    @State private var wordRangesByResourceHref: [String: EPUBResourceWordRange] = [:]
+    @State private var currentVisibleAutoAdvanceTarget: EPUBVisibleAutoAdvanceTarget?
+    @State private var lastAutoAdvanceTarget: EPUBAutoAdvanceTarget?
 
     private var theme: ReaderTheme { bookStore.readerTheme }
 
@@ -72,6 +75,8 @@ struct ReaderView: View {
             if playing {
                 scheduleHideControls()
                 updateWordHighlight() // resume keeps the word index unchanged, so onChange alone won't fire
+            } else {
+                lastAutoAdvanceTarget = nil
             }
         }
         .onChange(of: bookStore.readerTheme) { _, newTheme in
@@ -327,18 +332,20 @@ struct ReaderView: View {
             publication = pub
 
             let parsed = try await EPUBParserService.shared.parseBook(from: book, publication: pub)
+            let positionsByHref = await loadPositionsByResourceHref(from: pub)
             // Last suspension point: everything below runs synchronously on the
             // MainActor, so this single check closes the race where a dismissed
             // view's loadBook re-registers callbacks onDisappear just cleared
             // (recreating the manager↔view retain cycle with nothing to break it).
             guard !Task.isCancelled else { return }
             parsedBook = parsed
+            positionsByResourceHref = positionsByHref
+            wordRangesByResourceHref = EPUBAutoAdvanceDecider.wordRangesByResourceHref(from: parsed)
 
             playbackManager.setBook(paragraphs: parsed.flatParagraphs)
             currentSpeed = bookStore.playbackSpeed
             reconfigurePlayback()
 
-            // Build initial preferences from current theme/font
             let preferences = buildPreferences()
 
             let lookupAction = EditingAction(
@@ -366,7 +373,6 @@ struct ReaderView: View {
 
             let delegate = ReaderNavigatorDelegate(
                 onTap: { [self] in
-                    // Update selection state when controls toggle
                     hasTextSelection = nav.currentSelection != nil
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showControls.toggle()
@@ -375,10 +381,16 @@ struct ReaderView: View {
                         scheduleHideControls()
                     }
                 },
-                onLocationChanged: { locator in
+                onLocationChanged: { [self] locator in
+                    if currentVisibleAutoAdvanceTarget == nil {
+                        currentVisibleAutoAdvanceTarget = visibleAutoAdvanceTarget(from: locator)
+                    }
                     if let jsonString = locator.jsonString {
                         UserDefaults.standard.set(jsonString, forKey: "locator_\(book.id.uuidString)")
                     }
+                },
+                onViewportChanged: { [self] viewport in
+                    currentVisibleAutoAdvanceTarget = visibleAutoAdvanceTarget(from: viewport)
                 },
                 onSelectionChanged: { [self] _ in
                     hasTextSelection = nav.currentSelection != nil
@@ -397,10 +409,7 @@ struct ReaderView: View {
                         paragraphId: para.id,
                         globalWordIndex: position.globalWordIndex
                     )
-                    lastScrolledResourceHref = para.resourceHref
                 }
-            } else if let firstPara = parsed.flatParagraphs.first {
-                lastScrolledResourceHref = firstPara.resourceHref
             }
 
             navigator = nav
@@ -421,6 +430,50 @@ struct ReaderView: View {
     private func savedLocator() -> Locator? {
         guard let jsonString = UserDefaults.standard.string(forKey: "locator_\(book.id.uuidString)") else { return nil }
         return try? Locator(jsonString: jsonString)
+    }
+
+    /// Converts a point locator into a minimal visible target until viewport data arrives.
+    private func visibleAutoAdvanceTarget(from locator: Locator) -> EPUBVisibleAutoAdvanceTarget {
+        var progressionsByHref: [String: ClosedRange<Double>] = [:]
+        if let progression = locator.locations.progression {
+            progressionsByHref[locator.href.string] = progression...progression
+        }
+        return EPUBVisibleAutoAdvanceTarget(
+            resourceHrefs: [locator.href.string],
+            positionRange: locator.locations.position.map { $0...$0 },
+            progressionsByResourceHref: progressionsByHref
+        )
+    }
+
+    /// Converts Readium viewport data into the visual range used by speech page-following.
+    private func visibleAutoAdvanceTarget(from viewport: EPUBNavigatorViewController.Viewport?) -> EPUBVisibleAutoAdvanceTarget? {
+        guard let viewport else { return nil }
+        return EPUBVisibleAutoAdvanceTarget(
+            resourceHrefs: viewport.readingOrder.map(\.string),
+            positionRange: viewport.positions,
+            progressionsByResourceHref: Dictionary(
+                uniqueKeysWithValues: viewport.progressions.map { href, progression in
+                    (href.string, progression)
+                }
+            )
+        )
+    }
+
+    private func loadPositionsByResourceHref(from publication: Publication) async -> [String: [Int?]] {
+        nonisolated(unsafe) let unsafePublication = publication
+        guard case .success(let positionsByReadingOrder) = await unsafePublication.positionsByReadingOrder() else { return [:] }
+
+        var result: [String: [Int?]] = [:]
+        for (index, positions) in positionsByReadingOrder.enumerated() {
+            var hrefs = Set(positions.map { $0.href.string })
+            if let href = unsafePublication.readingOrder[safe: index]?.href {
+                hrefs.insert(href)
+            }
+            for href in hrefs {
+                result[href] = positions.map { $0.locations.position }
+            }
+        }
+        return result
     }
 
     private func reconfigurePlayback() {
@@ -519,13 +572,10 @@ struct ReaderView: View {
             mediaType: .xhtml
         )
 
-        lastScrolledResourceHref = firstParagraph.resourceHref
-
         Task {
             await nav.go(to: locator)
         }
 
-        // Start TTS from chapter start
         if let parsedBook,
            let index = parsedBook.flatParagraphs.firstIndex(where: { $0.id == firstParagraph.id }),
            !bookStore.activeApiKey.isEmpty, !bookStore.activeVoiceId.isEmpty {
@@ -567,14 +617,29 @@ struct ReaderView: View {
 
         nav.apply(decorations: [decoration], in: "tts")
 
-        // Only navigate when the resource (chapter) changes — no auto-scrolling
-        if paragraph.resourceHref != lastScrolledResourceHref {
-            lastScrolledResourceHref = paragraph.resourceHref
-            navigationTask?.cancel()
-            navigationTask = Task {
-                _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
-            }
+        guard shouldAutoAdvancePagesWithSpeech(to: paragraph, wordIndex: wordIndex) else { return }
+        navigationTask?.cancel()
+        navigationTask = Task {
+            _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
         }
+    }
+
+    private func shouldAutoAdvancePagesWithSpeech(to paragraph: BookParagraph, wordIndex: Int) -> Bool {
+        let target = EPUBAutoAdvanceDecider.target(
+            for: paragraph,
+            wordIndex: wordIndex,
+            positionsByResourceHref: positionsByResourceHref,
+            wordRangesByResourceHref: wordRangesByResourceHref
+        )
+        let decision = EPUBAutoAdvanceDecider.decide(
+            target: target,
+            visibleTarget: currentVisibleAutoAdvanceTarget,
+            lastTarget: lastAutoAdvanceTarget,
+            isEnabled: bookStore.autoAdvancePagesWithSpeech,
+            isPlaying: playbackManager.isPlaying
+        )
+        lastAutoAdvanceTarget = decision.nextLastTarget
+        return decision.shouldAdvance
     }
 
     private func jumpToCurrentPosition() {
@@ -598,10 +663,9 @@ struct ReaderView: View {
             )
         )
 
-        lastScrolledResourceHref = paragraph.resourceHref
         navigationTask?.cancel()
         navigationTask = Task {
-            await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
         }
     }
 
@@ -672,7 +736,7 @@ struct ReaderView: View {
 
         return EPUBPreferences(
             fontSize: bookStore.fontSize / 17.0, // Readium uses a scale factor
-            scroll: bookStore.isPagedMode ? false : true,
+            scroll: false,
             theme: readiumTheme
         )
     }
@@ -722,15 +786,18 @@ struct ReaderView: View {
 final class ReaderNavigatorDelegate: NSObject, EPUBNavigatorDelegate {
     private let onTap: () -> Void
     private let onLocationChanged: (Locator) -> Void
+    private let onViewportChanged: (EPUBNavigatorViewController.Viewport?) -> Void
     private let onSelectionChanged: ((Selection) -> Void)?
 
     init(
         onTap: @escaping () -> Void,
         onLocationChanged: @escaping (Locator) -> Void,
+        onViewportChanged: @escaping (EPUBNavigatorViewController.Viewport?) -> Void = { _ in },
         onSelectionChanged: ((Selection) -> Void)? = nil
     ) {
         self.onTap = onTap
         self.onLocationChanged = onLocationChanged
+        self.onViewportChanged = onViewportChanged
         self.onSelectionChanged = onSelectionChanged
     }
 
@@ -740,6 +807,10 @@ final class ReaderNavigatorDelegate: NSObject, EPUBNavigatorDelegate {
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         onLocationChanged(locator)
+    }
+
+    func navigator(_ navigator: EPUBNavigatorViewController, viewportDidChange viewport: EPUBNavigatorViewController.Viewport?) {
+        onViewportChanged(viewport)
     }
 
     func navigator(_ navigator: SelectableNavigator, shouldShowMenuForSelection selection: Selection) -> Bool {

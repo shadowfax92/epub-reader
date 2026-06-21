@@ -13,6 +13,29 @@ final class BookStoreImportTests: XCTestCase {
         Set((try? FileManager.default.contentsOfDirectory(atPath: booksDirectory.path)) ?? [])
     }
 
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: "autoAdvancePagesWithSpeech")
+        super.tearDown()
+    }
+
+    // MARK: - Settings
+
+    func testAutoAdvancePagesWithSpeechDefaultsOn() {
+        UserDefaults.standard.removeObject(forKey: "autoAdvancePagesWithSpeech")
+        let store = BookStore()
+
+        XCTAssertTrue(store.autoAdvancePagesWithSpeech)
+    }
+
+    func testAutoAdvancePagesWithSpeechPersistsFalse() {
+        let store = BookStore()
+        store.autoAdvancePagesWithSpeech = false
+
+        let reloaded = BookStore()
+
+        XCTAssertFalse(reloaded.autoAdvancePagesWithSpeech)
+    }
+
     // MARK: - EPUB
 
     func testImportsExplodedEPUBDirectory() async throws {

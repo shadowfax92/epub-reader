@@ -67,17 +67,10 @@ struct SettingsView: View {
                     in: 12...32,
                     step: 1
                 )
+            }
 
-                HStack {
-                    Text("Reading Mode")
-                    Spacer()
-                    Picker("", selection: pagedModeBinding) {
-                        Text("Scroll").tag(false)
-                        Text("Paged").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
-                }
+            Section("Narration") {
+                Toggle("Auto-Advance Pages", isOn: autoAdvancePagesBinding)
             }
         }
         .navigationTitle("Settings")
@@ -271,8 +264,11 @@ struct SettingsView: View {
         Binding(get: { bookStore.fontSize }, set: { bookStore.fontSize = $0 })
     }
 
-    private var pagedModeBinding: Binding<Bool> {
-        Binding(get: { bookStore.isPagedMode }, set: { bookStore.isPagedMode = $0 })
+    private var autoAdvancePagesBinding: Binding<Bool> {
+        Binding(
+            get: { bookStore.autoAdvancePagesWithSpeech },
+            set: { bookStore.autoAdvancePagesWithSpeech = $0 }
+        )
     }
 
     // MARK: - Actions
