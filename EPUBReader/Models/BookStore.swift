@@ -93,11 +93,6 @@ class BookStore: ObservableObject {
         set { objectWillChange.send(); defaults.set(newValue, forKey: "autoAdvancePagesWithSpeech") }
     }
 
-    var isPagedMode: Bool {
-        get { defaults.bool(forKey: "isPagedMode") }
-        set { objectWillChange.send(); defaults.set(newValue, forKey: "isPagedMode") }
-    }
-
     var readerTheme: ReaderTheme {
         get { ReaderTheme(rawValue: defaults.string(forKey: "readerTheme") ?? "system") ?? .system }
         set { objectWillChange.send(); defaults.set(newValue.rawValue, forKey: "readerTheme") }

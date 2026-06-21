@@ -55,6 +55,7 @@ struct PDFKitReaderView: UIViewRepresentable {
     let document: PDFDocument
     let proxy: PDFViewProxy
     let highlight: PDFWordHighlight?
+    let autoAdvancePagesWithSpeech: Bool
     let backgroundColor: UIColor
     let initialPageIndex: Int?
     var onTap: () -> Void
@@ -63,8 +64,9 @@ struct PDFKitReaderView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
-        pdfView.displayMode = .singlePageContinuous
-        pdfView.displayDirection = .vertical
+        pdfView.displayMode = .singlePage
+        pdfView.displayDirection = .horizontal
+        pdfView.usePageViewController(true, withViewOptions: nil)
         pdfView.autoScales = true
         pdfView.backgroundColor = backgroundColor
         pdfView.document = document
@@ -100,7 +102,11 @@ struct PDFKitReaderView: UIViewRepresentable {
         if pdfView.backgroundColor != backgroundColor {
             pdfView.backgroundColor = backgroundColor
         }
-        context.coordinator.applyHighlight(highlight, in: pdfView)
+        context.coordinator.applyHighlight(
+            highlight,
+            autoAdvancePagesWithSpeech: autoAdvancePagesWithSpeech,
+            in: pdfView
+        )
     }
 
     func makeCoordinator() -> Coordinator {
@@ -119,6 +125,7 @@ struct PDFKitReaderView: UIViewRepresentable {
         private var initialNavigationAttempts = 0
         private var currentAnnotations: [PDFAnnotation] = []
         private var lastHighlight: PDFWordHighlight?
+        private var lastAutoAdvancePagesWithSpeech: Bool?
         private var lastNavigatedPageIndex: Int?
         private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
 
@@ -204,13 +211,15 @@ struct PDFKitReaderView: UIViewRepresentable {
             true
         }
 
-        /// Swaps the transient word annotations; navigates only when the word
-        /// crosses onto a different page (mirrors the EPUB chapter-change rule).
-        /// One annotation per line fragment so hyphen-merged words spanning a line
-        /// break don't get a unioned box covering both full lines.
-        func applyHighlight(_ highlight: PDFWordHighlight?, in pdfView: PDFView) {
-            guard highlight != lastHighlight else { return }
+        /// Updates transient word annotations and optionally follows speech across pages.
+        func applyHighlight(
+            _ highlight: PDFWordHighlight?,
+            autoAdvancePagesWithSpeech: Bool,
+            in pdfView: PDFView
+        ) {
+            guard highlight != lastHighlight || autoAdvancePagesWithSpeech != lastAutoAdvancePagesWithSpeech else { return }
             lastHighlight = highlight
+            lastAutoAdvancePagesWithSpeech = autoAdvancePagesWithSpeech
 
             for annotation in currentAnnotations {
                 annotation.page?.removeAnnotation(annotation)
@@ -222,6 +231,7 @@ struct PDFKitReaderView: UIViewRepresentable {
                   let page = document.page(at: highlight.pageIndex),
                   let selection = page.selection(for: highlight.range) else { return }
 
+            // Line fragments avoid union boxes that cover gaps for wrapped or hyphen-merged words.
             for lineSelection in selection.selectionsByLine() {
                 let bounds = lineSelection.bounds(for: page)
                 guard !bounds.isNull, !bounds.isEmpty else { continue }
@@ -231,12 +241,11 @@ struct PDFKitReaderView: UIViewRepresentable {
                 currentAnnotations.append(annotation)
             }
 
-            if lastNavigatedPageIndex != highlight.pageIndex {
-                lastNavigatedPageIndex = highlight.pageIndex
-                let bounds = selection.bounds(for: page)
-                if pdfView.currentPage != page, !bounds.isNull {
-                    pdfView.go(to: bounds.insetBy(dx: -20, dy: -60), on: page)
-                }
+            guard autoAdvancePagesWithSpeech, lastNavigatedPageIndex != highlight.pageIndex else { return }
+            lastNavigatedPageIndex = highlight.pageIndex
+            let bounds = selection.bounds(for: page)
+            if pdfView.currentPage != page, !bounds.isNull {
+                pdfView.go(to: bounds.insetBy(dx: -20, dy: -60), on: page)
             }
         }
     }

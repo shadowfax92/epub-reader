@@ -20,7 +20,6 @@ struct ReaderView: View {
     @State private var showSettings = false
     @State private var showHighlights = false
     @State private var navigatorDelegate: ReaderNavigatorDelegate?
-    @State private var lastScrolledResourceHref: String?
     @State private var hasTextSelection = false
     @State private var navigationTask: Task<Void, Never>?
 
@@ -336,7 +335,6 @@ struct ReaderView: View {
             currentSpeed = bookStore.playbackSpeed
             reconfigurePlayback()
 
-            // Build initial preferences from current theme/font
             let preferences = buildPreferences()
 
             let lookupAction = EditingAction(
@@ -364,7 +362,6 @@ struct ReaderView: View {
 
             let delegate = ReaderNavigatorDelegate(
                 onTap: { [self] in
-                    // Update selection state when controls toggle
                     hasTextSelection = nav.currentSelection != nil
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showControls.toggle()
@@ -395,10 +392,7 @@ struct ReaderView: View {
                         paragraphId: para.id,
                         globalWordIndex: position.globalWordIndex
                     )
-                    lastScrolledResourceHref = para.resourceHref
                 }
-            } else if let firstPara = parsed.flatParagraphs.first {
-                lastScrolledResourceHref = firstPara.resourceHref
             }
 
             navigator = nav
@@ -499,13 +493,10 @@ struct ReaderView: View {
             mediaType: .xhtml
         )
 
-        lastScrolledResourceHref = firstParagraph.resourceHref
-
         Task {
             await nav.go(to: locator)
         }
 
-        // Start TTS from chapter start
         if let parsedBook,
            let index = parsedBook.flatParagraphs.firstIndex(where: { $0.id == firstParagraph.id }),
            !bookStore.activeApiKey.isEmpty, !bookStore.activeVoiceId.isEmpty {
@@ -547,13 +538,10 @@ struct ReaderView: View {
 
         nav.apply(decorations: [decoration], in: "tts")
 
-        // Only navigate when the resource (chapter) changes — no auto-scrolling
-        if paragraph.resourceHref != lastScrolledResourceHref {
-            lastScrolledResourceHref = paragraph.resourceHref
-            navigationTask?.cancel()
-            navigationTask = Task {
-                _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
-            }
+        guard bookStore.autoAdvancePagesWithSpeech else { return }
+        navigationTask?.cancel()
+        navigationTask = Task {
+            _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
         }
     }
 
@@ -578,7 +566,6 @@ struct ReaderView: View {
             )
         )
 
-        lastScrolledResourceHref = paragraph.resourceHref
         navigationTask?.cancel()
         navigationTask = Task {
             await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
@@ -652,7 +639,7 @@ struct ReaderView: View {
 
         return EPUBPreferences(
             fontSize: bookStore.fontSize / 17.0, // Readium uses a scale factor
-            scroll: bookStore.isPagedMode ? false : true,
+            scroll: false,
             theme: readiumTheme
         )
     }
