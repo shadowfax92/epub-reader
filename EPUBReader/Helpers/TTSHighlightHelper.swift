@@ -1,8 +1,7 @@
 import Foundation
 
 enum TTSHighlightHelper {
-    /// Checks if two EPUB resource hrefs refer to the same resource,
-    /// accounting for fragment identifiers and absolute/relative URL differences.
+    /// Checks whether two EPUB hrefs point at the same resource.
     static func hrefsMatch(_ a: String, _ b: String) -> Bool {
         if a == b { return true }
         let cleanA = a.components(separatedBy: "#").first ?? a
@@ -11,13 +10,7 @@ enum TTSHighlightHelper {
         return cleanA.hasSuffix("/" + cleanB) || cleanB.hasSuffix("/" + cleanA)
     }
 
-    /// Builds the TextQuoteAnchor context for the word at `wordPosition`,
-    /// capped at `maxContextChars` per side. Readium's Hypothesis matcher
-    /// similarity-scores every candidate occurrence of the highlight against
-    /// the full prefix/suffix, so full-paragraph contexts cost
-    /// O(candidates × paragraph length) in the WKWebView per spoken word.
-    /// Exact char slices (not word-aligned) mirror how the scorer slices
-    /// document text by length.
+    /// Builds the capped TextQuoteAnchor context for a spoken word.
     static func buildTextContext(
         words: [BookWord],
         wordPosition: Int,
@@ -29,8 +22,6 @@ enum TTSHighlightHelper {
 
         let highlight = words[wordPosition].text
 
-        // Collect only enough neighbor words to cover the cap, so cost is
-        // O(maxContextChars), not O(paragraph).
         var beforeParts: [String] = []
         var beforeLength = 0
         var index = wordPosition - 1
@@ -60,38 +51,67 @@ enum TTSHighlightHelper {
         )
     }
 
-    /// Finds the paragraph and word indices matching a selected text within parsed paragraphs.
+    /// Finds the playback start position for selected text in a parsed EPUB resource.
     static func findStartPosition(
         selectedText: String,
         hrefString: String,
         paragraphs: [BookParagraph]
     ) -> (paragraphIndex: Int, wordIndex: Int)? {
-        let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        let selectedWords = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let selectedWords = normalizedWords(in: selectedText)
         guard let firstSelectedWord = selectedWords.first else { return nil }
 
-        // First pass: match paragraph text + first word
         for (index, paragraph) in paragraphs.enumerated() {
             guard hrefsMatch(paragraph.resourceHref, hrefString) else { continue }
-            if paragraph.text.contains(trimmed),
-               let matchingWord = paragraph.words.first(where: { $0.text == firstSelectedWord }) {
-                return (paragraphIndex: index, wordIndex: matchingWord.id)
+            let paragraphWords = paragraph.words.map { normalizedForSelectionMatching($0.text) }
+            if let start = phraseStart(selectedWords, in: paragraphWords) {
+                return (paragraphIndex: index, wordIndex: paragraph.words[start].id)
             }
         }
 
-        // Second pass: match first selected word, but only if the selection is a single word
-        // (multi-word selections that didn't match a paragraph in pass 1 are too ambiguous)
         if selectedWords.count == 1 {
             for (index, paragraph) in paragraphs.enumerated() {
                 guard hrefsMatch(paragraph.resourceHref, hrefString) else { continue }
-                if let matchingWord = paragraph.words.first(where: { $0.text == firstSelectedWord }) {
+                if let matchingWord = paragraph.words.first(where: { normalizedForSelectionMatching($0.text) == firstSelectedWord }) {
                     return (paragraphIndex: index, wordIndex: matchingWord.id)
                 }
             }
         }
 
+        return nil
+    }
+
+    /// Normalizes parser and Readium selection text into the same comparison form.
+    private static func normalizedForSelectionMatching(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+            .replacingOccurrences(of: "\u{202F}", with: " ")
+            .replacingOccurrences(of: "\u{2018}", with: "'")
+            .replacingOccurrences(of: "\u{2019}", with: "'")
+            .replacingOccurrences(of: "\u{201C}", with: "\"")
+            .replacingOccurrences(of: "\u{201D}", with: "\"")
+            .replacingOccurrences(of: "\u{2013}", with: "-")
+            .replacingOccurrences(of: "\u{2014}", with: "-")
+            .replacingOccurrences(of: "\u{2011}", with: "-")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private static func normalizedWords(in text: String) -> [String] {
+        normalizedForSelectionMatching(text)
+            .components(separatedBy: " ")
+            .filter { !$0.isEmpty }
+    }
+
+    private static func phraseStart(_ phrase: [String], in words: [String]) -> Int? {
+        guard !phrase.isEmpty, phrase.count <= words.count else { return nil }
+
+        for start in 0...(words.count - phrase.count) {
+            let end = start + phrase.count
+            if zip(words[start..<end], phrase).allSatisfy({ pair in pair.0 == pair.1 }) {
+                return start
+            }
+        }
         return nil
     }
 }
