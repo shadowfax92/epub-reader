@@ -22,9 +22,9 @@ struct ReaderView: View {
     @State private var navigatorDelegate: ReaderNavigatorDelegate?
     @State private var hasTextSelection = false
     @State private var navigationTask: Task<Void, Never>?
-    @State private var positionsByResourceHref: [String: [Locator]] = [:]
-    @State private var wordRangesByResourceHref: [String: ResourceWordRange] = [:]
-    @State private var currentVisibleAutoAdvanceTarget: EPUBAutoAdvanceTarget?
+    @State private var positionsByResourceHref: [String: [Int?]] = [:]
+    @State private var wordRangesByResourceHref: [String: EPUBResourceWordRange] = [:]
+    @State private var currentVisibleAutoAdvanceTarget: EPUBVisibleAutoAdvanceTarget?
     @State private var lastAutoAdvanceTarget: EPUBAutoAdvanceTarget?
 
     private var theme: ReaderTheme { bookStore.readerTheme }
@@ -33,19 +33,6 @@ struct ReaderView: View {
         guard let total = parsedBook?.totalWords, total > 0 else { return nil }
         let current = playbackManager.currentGlobalWordIndex
         return min(100, max(0, current * 100 / total))
-    }
-
-    private struct ResourceWordRange {
-        let firstWordId: Int
-        let lastWordId: Int
-
-        var wordCount: Int { lastWordId - firstWordId + 1 }
-    }
-
-    private struct EPUBAutoAdvanceTarget: Equatable {
-        let resourceHref: String
-        let position: Int?
-        let fallbackParagraphId: Int?
     }
 
     var body: some View {
@@ -351,7 +338,7 @@ struct ReaderView: View {
             guard !Task.isCancelled else { return }
             parsedBook = parsed
             positionsByResourceHref = positionsByHref
-            wordRangesByResourceHref = Self.wordRangesByResourceHref(from: parsed)
+            wordRangesByResourceHref = EPUBAutoAdvanceDecider.wordRangesByResourceHref(from: parsed)
 
             playbackManager.setBook(paragraphs: parsed.flatParagraphs)
             currentSpeed = bookStore.playbackSpeed
@@ -393,14 +380,15 @@ struct ReaderView: View {
                     }
                 },
                 onLocationChanged: { [self] locator in
-                    currentVisibleAutoAdvanceTarget = EPUBAutoAdvanceTarget(
-                        resourceHref: locator.href.string,
-                        position: locator.locations.position,
-                        fallbackParagraphId: nil
-                    )
+                    if currentVisibleAutoAdvanceTarget == nil {
+                        currentVisibleAutoAdvanceTarget = visibleAutoAdvanceTarget(from: locator)
+                    }
                     if let jsonString = locator.jsonString {
                         UserDefaults.standard.set(jsonString, forKey: "locator_\(book.id.uuidString)")
                     }
+                },
+                onViewportChanged: { [self] viewport in
+                    currentVisibleAutoAdvanceTarget = visibleAutoAdvanceTarget(from: viewport)
                 },
                 onSelectionChanged: { [self] _ in
                     hasTextSelection = nav.currentSelection != nil
@@ -442,35 +430,45 @@ struct ReaderView: View {
         return try? Locator(jsonString: jsonString)
     }
 
-    private func loadPositionsByResourceHref(from publication: Publication) async -> [String: [Locator]] {
+    /// Converts a point locator into a minimal visible target until viewport data arrives.
+    private func visibleAutoAdvanceTarget(from locator: Locator) -> EPUBVisibleAutoAdvanceTarget {
+        var progressionsByHref: [String: ClosedRange<Double>] = [:]
+        if let progression = locator.locations.progression {
+            progressionsByHref[locator.href.string] = progression...progression
+        }
+        return EPUBVisibleAutoAdvanceTarget(
+            resourceHrefs: [locator.href.string],
+            positionRange: locator.locations.position.map { $0...$0 },
+            progressionsByResourceHref: progressionsByHref
+        )
+    }
+
+    /// Converts Readium viewport data into the visual range used by speech page-following.
+    private func visibleAutoAdvanceTarget(from viewport: EPUBNavigatorViewController.Viewport?) -> EPUBVisibleAutoAdvanceTarget? {
+        guard let viewport else { return nil }
+        return EPUBVisibleAutoAdvanceTarget(
+            resourceHrefs: viewport.readingOrder.map(\.string),
+            positionRange: viewport.positions,
+            progressionsByResourceHref: Dictionary(
+                uniqueKeysWithValues: viewport.progressions.map { href, progression in
+                    (href.string, progression)
+                }
+            )
+        )
+    }
+
+    private func loadPositionsByResourceHref(from publication: Publication) async -> [String: [Int?]] {
         nonisolated(unsafe) let unsafePublication = publication
         guard case .success(let positionsByReadingOrder) = await unsafePublication.positionsByReadingOrder() else { return [:] }
 
-        var result: [String: [Locator]] = [:]
+        var result: [String: [Int?]] = [:]
         for (index, positions) in positionsByReadingOrder.enumerated() {
             var hrefs = Set(positions.map { $0.href.string })
             if let href = unsafePublication.readingOrder[safe: index]?.href {
                 hrefs.insert(href)
             }
             for href in hrefs {
-                result[href] = positions
-            }
-        }
-        return result
-    }
-
-    private static func wordRangesByResourceHref(from parsedBook: ParsedBook) -> [String: ResourceWordRange] {
-        var result: [String: ResourceWordRange] = [:]
-        for paragraph in parsedBook.flatParagraphs {
-            guard let firstWordId = paragraph.words.first?.id,
-                  let lastWordId = paragraph.words.last?.id else { continue }
-
-            if let existing = result[paragraph.resourceHref] {
-                let first = min(existing.firstWordId, firstWordId)
-                let last = max(existing.lastWordId, lastWordId)
-                result[paragraph.resourceHref] = ResourceWordRange(firstWordId: first, lastWordId: last)
-            } else {
-                result[paragraph.resourceHref] = ResourceWordRange(firstWordId: firstWordId, lastWordId: lastWordId)
+                result[href] = positions.map { $0.locations.position }
             }
         }
         return result
@@ -607,49 +605,21 @@ struct ReaderView: View {
     }
 
     private func shouldAutoAdvancePagesWithSpeech(to paragraph: BookParagraph, wordIndex: Int) -> Bool {
-        guard bookStore.autoAdvancePagesWithSpeech, playbackManager.isPlaying else {
-            lastAutoAdvanceTarget = nil
-            return false
-        }
-
-        let target = autoAdvanceTarget(for: paragraph, wordIndex: wordIndex)
-        if isVisibleAutoAdvanceTarget(target) {
-            lastAutoAdvanceTarget = target
-            return false
-        }
-        guard target != lastAutoAdvanceTarget else { return false }
-        lastAutoAdvanceTarget = target
-        return true
-    }
-
-    private func autoAdvanceTarget(for paragraph: BookParagraph, wordIndex: Int) -> EPUBAutoAdvanceTarget {
-        let position = estimatedReadiumPosition(resourceHref: paragraph.resourceHref, wordIndex: wordIndex)
-        return EPUBAutoAdvanceTarget(
-            resourceHref: paragraph.resourceHref,
-            position: position,
-            fallbackParagraphId: position == nil ? paragraph.id : nil
+        let target = EPUBAutoAdvanceDecider.target(
+            for: paragraph,
+            wordIndex: wordIndex,
+            positionsByResourceHref: positionsByResourceHref,
+            wordRangesByResourceHref: wordRangesByResourceHref
         )
-    }
-
-    private func estimatedReadiumPosition(resourceHref: String, wordIndex: Int) -> Int? {
-        guard let positions = positionsByResourceHref[resourceHref],
-              !positions.isEmpty,
-              let range = wordRangesByResourceHref[resourceHref],
-              range.wordCount > 0 else { return nil }
-
-        let relativeWordIndex = min(max(0, wordIndex - range.firstWordId), range.wordCount - 1)
-        let progression = Double(relativeWordIndex) / Double(max(1, range.wordCount - 1))
-        let positionIndex = min(positions.count - 1, Int(floor(progression * Double(positions.count))))
-        return positions[positionIndex].locations.position ?? positionIndex
-    }
-
-    private func isVisibleAutoAdvanceTarget(_ target: EPUBAutoAdvanceTarget) -> Bool {
-        guard let visible = currentVisibleAutoAdvanceTarget,
-              TTSHighlightHelper.hrefsMatch(target.resourceHref, visible.resourceHref) else { return false }
-        if let position = target.position, let visiblePosition = visible.position {
-            return position == visiblePosition
-        }
-        return target.position == nil && target.fallbackParagraphId == visible.fallbackParagraphId
+        let decision = EPUBAutoAdvanceDecider.decide(
+            target: target,
+            visibleTarget: currentVisibleAutoAdvanceTarget,
+            lastTarget: lastAutoAdvanceTarget,
+            isEnabled: bookStore.autoAdvancePagesWithSpeech,
+            isPlaying: playbackManager.isPlaying
+        )
+        lastAutoAdvanceTarget = decision.nextLastTarget
+        return decision.shouldAdvance
     }
 
     private func jumpToCurrentPosition() {
@@ -796,15 +766,18 @@ struct ReaderView: View {
 final class ReaderNavigatorDelegate: NSObject, EPUBNavigatorDelegate {
     private let onTap: () -> Void
     private let onLocationChanged: (Locator) -> Void
+    private let onViewportChanged: (EPUBNavigatorViewController.Viewport?) -> Void
     private let onSelectionChanged: ((Selection) -> Void)?
 
     init(
         onTap: @escaping () -> Void,
         onLocationChanged: @escaping (Locator) -> Void,
+        onViewportChanged: @escaping (EPUBNavigatorViewController.Viewport?) -> Void = { _ in },
         onSelectionChanged: ((Selection) -> Void)? = nil
     ) {
         self.onTap = onTap
         self.onLocationChanged = onLocationChanged
+        self.onViewportChanged = onViewportChanged
         self.onSelectionChanged = onSelectionChanged
     }
 
@@ -814,6 +787,10 @@ final class ReaderNavigatorDelegate: NSObject, EPUBNavigatorDelegate {
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         onLocationChanged(locator)
+    }
+
+    func navigator(_ navigator: EPUBNavigatorViewController, viewportDidChange viewport: EPUBNavigatorViewController.Viewport?) {
+        onViewportChanged(viewport)
     }
 
     func navigator(_ navigator: SelectableNavigator, shouldShowMenuForSelection selection: Selection) -> Bool {

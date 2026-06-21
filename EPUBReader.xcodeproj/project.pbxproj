@@ -37,6 +37,8 @@
 		88779632FAC86C11983312F8 /* EPUBReaderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DC7AA80E68BCE5CDAC91BF /* EPUBReaderApp.swift */; };
 		90845789391141653A007272 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = 8FEF355C3BCDD3AAB280F84E /* ReadiumNavigator */; };
 		9E847438A5BA225FBB400BE4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA43EAC7B6FD78876267B56 /* SettingsView.swift */; };
+		AA1F4C7D9E2A4B6C8D0E1235 /* EPUBAutoAdvanceDecider.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1F4C7D9E2A4B6C8D0E1234 /* EPUBAutoAdvanceDecider.swift */; };
+		AA1F4C7D9E2A4B6C8D0E1237 /* EPUBAutoAdvanceDeciderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1F4C7D9E2A4B6C8D0E1236 /* EPUBAutoAdvanceDeciderTests.swift */; };
 		A560D2859DA42BFA333E9982 /* PDFTextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E1E73BED909ECCB38442DF /* PDFTextExtractor.swift */; };
 		B223E0EAD2AED6B89A80F9ED /* BookLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0AE34EF6866D86E1AC9ACC6 /* BookLookup.swift */; };
 		B3B54993EA38B62C101D8E5A /* TTSTimingMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 609A3EC09F3BFFC76C8D6AF0 /* TTSTimingMapper.swift */; };
@@ -94,6 +96,8 @@
 		9A2D4A313666A4D493174F12 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
 		9A42C62234F8995A951AEB8B /* ElevenLabsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElevenLabsService.swift; sourceTree = "<group>"; };
 		A0585283C7FCD0CC23D4B72A /* EPUBParserService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBParserService.swift; sourceTree = "<group>"; };
+		AA1F4C7D9E2A4B6C8D0E1234 /* EPUBAutoAdvanceDecider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBAutoAdvanceDecider.swift; sourceTree = "<group>"; };
+		AA1F4C7D9E2A4B6C8D0E1236 /* EPUBAutoAdvanceDeciderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBAutoAdvanceDeciderTests.swift; sourceTree = "<group>"; };
 		A5DC7AA80E68BCE5CDAC91BF /* EPUBReaderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderApp.swift; sourceTree = "<group>"; };
 		ADB0D8D9E48BD40246619D80 /* ReadiumService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumService.swift; sourceTree = "<group>"; };
 		B4CB11BA781F1E8E3AFE7A27 /* PDFParserServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFParserServiceTests.swift; sourceTree = "<group>"; };
@@ -132,6 +136,7 @@
 				E0556BB93AF7485712E5946E /* BookFormatTests.swift */,
 				04E3319B65DDF52BAD02AE85 /* BookLookupTests.swift */,
 				2053454222740C29237F43EB /* BookStoreImportTests.swift */,
+				AA1F4C7D9E2A4B6C8D0E1236 /* EPUBAutoAdvanceDeciderTests.swift */,
 				0C789BB26ABE881435EE7A59 /* EPUBFixtures.swift */,
 				26844B9114F8BD05CD13D853 /* EPUBImportTests.swift */,
 				B4CB11BA781F1E8E3AFE7A27 /* PDFParserServiceTests.swift */,
@@ -220,6 +225,7 @@
 			children = (
 				1329FE2B1B23B56E03A40484 /* BookDropImport.swift */,
 				E0AE34EF6866D86E1AC9ACC6 /* BookLookup.swift */,
+				AA1F4C7D9E2A4B6C8D0E1234 /* EPUBAutoAdvanceDecider.swift */,
 				68292820948B504178EF3EAD /* EPUBImport.swift */,
 				0714E4FCCB887B557F03927C /* PDFSelectionMapper.swift */,
 				F2E1E73BED909ECCB38442DF /* PDFTextExtractor.swift */,
@@ -331,6 +337,7 @@
 				B223E0EAD2AED6B89A80F9ED /* BookLookup.swift in Sources */,
 				5A54FA753D70489C180836CB /* BookStore.swift in Sources */,
 				2E02FD12B2034C7893BD224A /* EPUBImport.swift in Sources */,
+				AA1F4C7D9E2A4B6C8D0E1235 /* EPUBAutoAdvanceDecider.swift in Sources */,
 				74C6F1569226488853E9B03C /* EPUBParserService.swift in Sources */,
 				88779632FAC86C11983312F8 /* EPUBReaderApp.swift in Sources */,
 				101709F650D9C74F15BA777D /* ElevenLabsService.swift in Sources */,
@@ -362,6 +369,7 @@
 				DEE17ADA60C157D7389F1A79 /* BookFormatTests.swift in Sources */,
 				73B9F8373DCC91614AFFF752 /* BookLookupTests.swift in Sources */,
 				C640F3AE87C66AEF019FEA37 /* BookStoreImportTests.swift in Sources */,
+				AA1F4C7D9E2A4B6C8D0E1237 /* EPUBAutoAdvanceDeciderTests.swift in Sources */,
 				52B55C8EE95B667402F07F95 /* EPUBFixtures.swift in Sources */,
 				F05E1CD412C17460BF43415C /* EPUBImportTests.swift in Sources */,
 				500D362D95F37E0D438AAFD9 /* PDFParserServiceTests.swift in Sources */,
