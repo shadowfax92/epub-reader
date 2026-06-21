@@ -22,6 +22,10 @@ struct ReaderView: View {
     @State private var navigatorDelegate: ReaderNavigatorDelegate?
     @State private var hasTextSelection = false
     @State private var navigationTask: Task<Void, Never>?
+    @State private var positionsByResourceHref: [String: [Locator]] = [:]
+    @State private var wordRangesByResourceHref: [String: ResourceWordRange] = [:]
+    @State private var currentVisibleAutoAdvanceTarget: EPUBAutoAdvanceTarget?
+    @State private var lastAutoAdvanceTarget: EPUBAutoAdvanceTarget?
 
     private var theme: ReaderTheme { bookStore.readerTheme }
 
@@ -29,6 +33,19 @@ struct ReaderView: View {
         guard let total = parsedBook?.totalWords, total > 0 else { return nil }
         let current = playbackManager.currentGlobalWordIndex
         return min(100, max(0, current * 100 / total))
+    }
+
+    private struct ResourceWordRange {
+        let firstWordId: Int
+        let lastWordId: Int
+
+        var wordCount: Int { lastWordId - firstWordId + 1 }
+    }
+
+    private struct EPUBAutoAdvanceTarget: Equatable {
+        let resourceHref: String
+        let position: Int?
+        let fallbackParagraphId: Int?
     }
 
     var body: some View {
@@ -69,6 +86,8 @@ struct ReaderView: View {
             if playing {
                 scheduleHideControls()
                 updateWordHighlight() // resume keeps the word index unchanged, so onChange alone won't fire
+            } else {
+                lastAutoAdvanceTarget = nil
             }
         }
         .onChange(of: bookStore.readerTheme) { _, newTheme in
@@ -324,12 +343,15 @@ struct ReaderView: View {
             publication = pub
 
             let parsed = try await EPUBParserService.shared.parseBook(from: book, publication: pub)
+            let positionsByHref = await loadPositionsByResourceHref(from: pub)
             // Last suspension point: everything below runs synchronously on the
             // MainActor, so this single check closes the race where a dismissed
             // view's loadBook re-registers callbacks onDisappear just cleared
             // (recreating the manager↔view retain cycle with nothing to break it).
             guard !Task.isCancelled else { return }
             parsedBook = parsed
+            positionsByResourceHref = positionsByHref
+            wordRangesByResourceHref = Self.wordRangesByResourceHref(from: parsed)
 
             playbackManager.setBook(paragraphs: parsed.flatParagraphs)
             currentSpeed = bookStore.playbackSpeed
@@ -370,7 +392,12 @@ struct ReaderView: View {
                         scheduleHideControls()
                     }
                 },
-                onLocationChanged: { locator in
+                onLocationChanged: { [self] locator in
+                    currentVisibleAutoAdvanceTarget = EPUBAutoAdvanceTarget(
+                        resourceHref: locator.href.string,
+                        position: locator.locations.position,
+                        fallbackParagraphId: nil
+                    )
                     if let jsonString = locator.jsonString {
                         UserDefaults.standard.set(jsonString, forKey: "locator_\(book.id.uuidString)")
                     }
@@ -413,6 +440,40 @@ struct ReaderView: View {
     private func savedLocator() -> Locator? {
         guard let jsonString = UserDefaults.standard.string(forKey: "locator_\(book.id.uuidString)") else { return nil }
         return try? Locator(jsonString: jsonString)
+    }
+
+    private func loadPositionsByResourceHref(from publication: Publication) async -> [String: [Locator]] {
+        nonisolated(unsafe) let unsafePublication = publication
+        guard case .success(let positionsByReadingOrder) = await unsafePublication.positionsByReadingOrder() else { return [:] }
+
+        var result: [String: [Locator]] = [:]
+        for (index, positions) in positionsByReadingOrder.enumerated() {
+            var hrefs = Set(positions.map { $0.href.string })
+            if let href = unsafePublication.readingOrder[safe: index]?.href {
+                hrefs.insert(href)
+            }
+            for href in hrefs {
+                result[href] = positions
+            }
+        }
+        return result
+    }
+
+    private static func wordRangesByResourceHref(from parsedBook: ParsedBook) -> [String: ResourceWordRange] {
+        var result: [String: ResourceWordRange] = [:]
+        for paragraph in parsedBook.flatParagraphs {
+            guard let firstWordId = paragraph.words.first?.id,
+                  let lastWordId = paragraph.words.last?.id else { continue }
+
+            if let existing = result[paragraph.resourceHref] {
+                let first = min(existing.firstWordId, firstWordId)
+                let last = max(existing.lastWordId, lastWordId)
+                result[paragraph.resourceHref] = ResourceWordRange(firstWordId: first, lastWordId: last)
+            } else {
+                result[paragraph.resourceHref] = ResourceWordRange(firstWordId: firstWordId, lastWordId: lastWordId)
+            }
+        }
+        return result
     }
 
     private func reconfigurePlayback() {
@@ -538,11 +599,57 @@ struct ReaderView: View {
 
         nav.apply(decorations: [decoration], in: "tts")
 
-        guard bookStore.autoAdvancePagesWithSpeech else { return }
+        guard shouldAutoAdvancePagesWithSpeech(to: paragraph, wordIndex: wordIndex) else { return }
         navigationTask?.cancel()
         navigationTask = Task {
             _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
         }
+    }
+
+    private func shouldAutoAdvancePagesWithSpeech(to paragraph: BookParagraph, wordIndex: Int) -> Bool {
+        guard bookStore.autoAdvancePagesWithSpeech, playbackManager.isPlaying else {
+            lastAutoAdvanceTarget = nil
+            return false
+        }
+
+        let target = autoAdvanceTarget(for: paragraph, wordIndex: wordIndex)
+        if isVisibleAutoAdvanceTarget(target) {
+            lastAutoAdvanceTarget = target
+            return false
+        }
+        guard target != lastAutoAdvanceTarget else { return false }
+        lastAutoAdvanceTarget = target
+        return true
+    }
+
+    private func autoAdvanceTarget(for paragraph: BookParagraph, wordIndex: Int) -> EPUBAutoAdvanceTarget {
+        let position = estimatedReadiumPosition(resourceHref: paragraph.resourceHref, wordIndex: wordIndex)
+        return EPUBAutoAdvanceTarget(
+            resourceHref: paragraph.resourceHref,
+            position: position,
+            fallbackParagraphId: position == nil ? paragraph.id : nil
+        )
+    }
+
+    private func estimatedReadiumPosition(resourceHref: String, wordIndex: Int) -> Int? {
+        guard let positions = positionsByResourceHref[resourceHref],
+              !positions.isEmpty,
+              let range = wordRangesByResourceHref[resourceHref],
+              range.wordCount > 0 else { return nil }
+
+        let relativeWordIndex = min(max(0, wordIndex - range.firstWordId), range.wordCount - 1)
+        let progression = Double(relativeWordIndex) / Double(max(1, range.wordCount - 1))
+        let positionIndex = min(positions.count - 1, Int(floor(progression * Double(positions.count))))
+        return positions[positionIndex].locations.position ?? positionIndex
+    }
+
+    private func isVisibleAutoAdvanceTarget(_ target: EPUBAutoAdvanceTarget) -> Bool {
+        guard let visible = currentVisibleAutoAdvanceTarget,
+              TTSHighlightHelper.hrefsMatch(target.resourceHref, visible.resourceHref) else { return false }
+        if let position = target.position, let visiblePosition = visible.position {
+            return position == visiblePosition
+        }
+        return target.position == nil && target.fallbackParagraphId == visible.fallbackParagraphId
     }
 
     private func jumpToCurrentPosition() {
@@ -568,7 +675,7 @@ struct ReaderView: View {
 
         navigationTask?.cancel()
         navigationTask = Task {
-            await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
         }
     }
 
