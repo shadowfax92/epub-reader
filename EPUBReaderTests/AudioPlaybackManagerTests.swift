@@ -53,4 +53,16 @@ final class AudioPlaybackManagerTests: XCTestCase {
 
         XCTAssertEqual(savedPositions.last?.paragraphIndex, 2)
     }
+
+    func testPlayClearsStaleErrorImmediately() {
+        let manager = AudioPlaybackManager()
+        manager.setBook(paragraphs: makeParagraphs())
+        manager.configure(provider: .openAI, apiKey: "", voiceId: "", speed: 1.0) { _ in }
+        manager.error = "Previous selection failed."
+
+        manager.play(fromParagraphIndex: 0)
+
+        XCTAssertNil(manager.error)
+        manager.stop()
+    }
 }

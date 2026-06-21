@@ -141,6 +141,36 @@ final class TTSHighlightHelperTests: XCTestCase {
         XCTAssertEqual(result?.wordIndex, 2) // "Goodbye" has id 2
     }
 
+    func testFindStartPositionNormalizesSelectionWhitespace() {
+        let paragraphs = [
+            BookParagraph(id: 0, text: "Hello brave world", words: makeWords(["Hello", "brave", "world"], startId: 0), chapterIndex: 0, isHeading: false, resourceHref: "ch1.xhtml"),
+        ]
+
+        let result = TTSHighlightHelper.findStartPosition(
+            selectedText: "Hello\nbrave\u{00A0}world",
+            hrefString: "ch1.xhtml",
+            paragraphs: paragraphs
+        )
+
+        XCTAssertEqual(result?.paragraphIndex, 0)
+        XCTAssertEqual(result?.wordIndex, 0)
+    }
+
+    func testFindStartPositionNormalizesTypographicPunctuation() {
+        let paragraphs = [
+            BookParagraph(id: 0, text: "\"Hello\" world", words: makeWords(["\"Hello\"", "world"], startId: 0), chapterIndex: 0, isHeading: false, resourceHref: "ch1.xhtml"),
+        ]
+
+        let result = TTSHighlightHelper.findStartPosition(
+            selectedText: "“Hello” world",
+            hrefString: "ch1.xhtml",
+            paragraphs: paragraphs
+        )
+
+        XCTAssertEqual(result?.paragraphIndex, 0)
+        XCTAssertEqual(result?.wordIndex, 0)
+    }
+
     func testFindStartPositionDifferentResource() {
         let paragraphs = [
             BookParagraph(id: 0, text: "Hello world", words: makeWords(["Hello", "world"], startId: 0), chapterIndex: 0, isHeading: false, resourceHref: "ch1.xhtml"),
