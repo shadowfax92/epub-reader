@@ -4,6 +4,18 @@ import ReadiumNavigator
 
 private let selectionStartErrorMessage = "Could not start from that selection. Try selecting a little more text."
 
+private struct EPUBLocatorSignature: Equatable {
+    let href: String
+    let position: Int?
+    let progressionBucket: Int?
+
+    init(_ locator: Locator) {
+        href = locator.href.string
+        position = locator.locations.position
+        progressionBucket = locator.locations.progression.map { Int(($0 * 10_000).rounded()) }
+    }
+}
+
 struct ReaderView: View {
     let book: BookMetadata
     @EnvironmentObject var bookStore: BookStore
@@ -29,7 +41,7 @@ struct ReaderView: View {
     @State private var currentVisibleAutoAdvanceTarget: EPUBVisibleAutoAdvanceTarget?
     @State private var lastAutoAdvanceTarget: EPUBAutoAdvanceTarget?
     @State private var suppressNextLocatorCloudOverwrite = true
-    @State private var hasExplicitProgressIntent = false
+    @State private var suppressedLocatorSignature: EPUBLocatorSignature?
 
     private var theme: ReaderTheme { bookStore.readerTheme }
 
@@ -395,7 +407,6 @@ struct ReaderView: View {
 
             let delegate = ReaderNavigatorDelegate(
                 onTap: { [self] in
-                    hasExplicitProgressIntent = true
                     hasTextSelection = nav.currentSelection != nil
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showControls.toggle()
@@ -409,8 +420,7 @@ struct ReaderView: View {
                         currentVisibleAutoAdvanceTarget = visibleAutoAdvanceTarget(from: locator)
                     }
                     if let jsonString = locator.jsonString {
-                        let allowReplacingNewerRemote = hasExplicitProgressIntent && !suppressNextLocatorCloudOverwrite
-                        suppressNextLocatorCloudOverwrite = false
+                        let allowReplacingNewerRemote = allowReplacingNewerCloudProgress(with: EPUBLocatorSignature(locator))
                         bookStore.saveEPUBLocator(
                             book: book,
                             locatorJSONString: jsonString,
@@ -541,7 +551,6 @@ struct ReaderView: View {
 
         if let nav = navigator,
            let selection = nav.currentSelection {
-            hasExplicitProgressIntent = true
             guard let startPos = findStartFromSelection(selection) else {
                 showPlaybackError(selectionStartErrorMessage)
                 return
@@ -554,7 +563,6 @@ struct ReaderView: View {
             return
         }
 
-        hasExplicitProgressIntent = true
         reconfigurePlayback()
 
         // Clamp: a persisted index can go stale if extraction logic changes across app updates.
@@ -577,7 +585,6 @@ struct ReaderView: View {
             return
         }
 
-        hasExplicitProgressIntent = true
         reconfigurePlayback()
         playbackManager.play(fromParagraphIndex: startPos.paragraphIndex, wordIndex: startPos.wordIndex)
         navigator?.clearSelection()
@@ -608,7 +615,6 @@ struct ReaderView: View {
               let firstParagraph = chapter.paragraphs.first,
               let hrefURL = AnyURL(string: firstParagraph.resourceHref) else { return }
 
-        hasExplicitProgressIntent = true
         let locator = Locator(
             href: hrefURL,
             mediaType: .xhtml
@@ -685,12 +691,10 @@ struct ReaderView: View {
     }
 
     private func jumpToCurrentPosition() {
-        hasExplicitProgressIntent = true
         jumpToPosition(paragraphId: playbackManager.currentParagraphId, wordIndex: playbackManager.currentGlobalWordIndex)
     }
 
     private func jumpToLatestCloudProgress() {
-        hasExplicitProgressIntent = true
         guard let progress = bookStore.newerCloudProgress(for: book) else { return }
         jumpToCloudProgress(progress)
     }
@@ -703,10 +707,12 @@ struct ReaderView: View {
            let nav = navigator {
             navigationTask?.cancel()
             suppressNextLocatorCloudOverwrite = true
+            suppressedLocatorSignature = nil
             navigationTask = Task {
                 guard await nav.go(to: locator, options: NavigatorGoOptions(animated: true)) else {
                     await MainActor.run {
                         suppressNextLocatorCloudOverwrite = false
+                        suppressedLocatorSignature = nil
                     }
                     return
                 }
@@ -739,6 +745,16 @@ struct ReaderView: View {
             globalWordIndex: position.globalWordIndex
         )
         updateWordHighlight()
+    }
+
+    private func allowReplacingNewerCloudProgress(with signature: EPUBLocatorSignature) -> Bool {
+        if suppressNextLocatorCloudOverwrite {
+            suppressNextLocatorCloudOverwrite = false
+            suppressedLocatorSignature = signature
+            return false
+        }
+
+        return signature != suppressedLocatorSignature
     }
 
     private func jumpToPosition(paragraphId: Int, wordIndex: Int) {

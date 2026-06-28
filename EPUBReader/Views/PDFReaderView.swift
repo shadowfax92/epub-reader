@@ -29,6 +29,7 @@ struct PDFReaderView: View {
     @State private var hasTextSelection = false
     @State private var currentHighlight: PDFWordHighlight?
     @State private var initialPageIndex: Int?
+    @State private var currentVisiblePageIndex: Int?
 
     private var theme: ReaderTheme { bookStore.readerTheme }
 
@@ -58,6 +59,7 @@ struct PDFReaderView: View {
                     onTap: { toggleControls() },
                     onSelectionChanged: { hasTextSelection = $0 },
                     onVisiblePageChanged: { pageIndex in
+                        currentVisiblePageIndex = pageIndex
                         bookStore.savePDFPage(book: book, pageIndex: pageIndex)
                     }
                 )
@@ -325,6 +327,7 @@ struct PDFReaderView: View {
 
         initialPageIndex = bookStore.getPDFPage(bookId: book.id)
             ?? parsed.wordLocations[safe: playbackManager.currentGlobalWordIndex]?.pageIndex
+        currentVisiblePageIndex = initialPageIndex
 
         pdfDocument = document
         isLoading = false
@@ -341,10 +344,16 @@ struct PDFReaderView: View {
                 bookStore.saveReadingPosition(
                     book: book,
                     position: position,
-                    pageIndex: parsedPDF?.wordLocations[safe: position.globalWordIndex]?.pageIndex
+                    pageIndex: syncedPageIndex(forPlaybackPosition: position)
                 )
             }
         )
+    }
+
+    private func syncedPageIndex(forPlaybackPosition position: ReadingPosition) -> Int? {
+        guard let playbackPageIndex = parsedPDF?.wordLocations[safe: position.globalWordIndex]?.pageIndex else { return nil }
+        let visiblePageIndex = currentVisiblePageIndex ?? bookStore.getPDFPage(bookId: book.id)
+        return visiblePageIndex == playbackPageIndex ? playbackPageIndex : nil
     }
 
     private func handlePlayPause() {

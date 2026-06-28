@@ -460,6 +460,30 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertNil(epubProgress?.readingPosition)
     }
 
+    func testPDFReadingPositionWithoutTrustedPageKeepsManualPageProgress() {
+        let book = makeBook(title: "PDF Manual Page", fileName: "manual-page.pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+        let stalePosition = ReadingPosition(chapterIndex: 0, paragraphIndex: 0, globalWordIndex: 0)
+
+        bookStore.savePDFPage(book: book, pageIndex: 5, updatedAt: Date(timeIntervalSince1970: 100))
+        bookStore.saveReadingPosition(
+            book: book,
+            position: stalePosition,
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        let progress = cloudStore.progress(for: book)
+        XCTAssertEqual(progress?.pageIndex, 5)
+        XCTAssertEqual(progress?.displayPage, 6)
+        XCTAssertEqual(progress?.readingPosition, stalePosition)
+    }
+
     func testSavingEPUBLocatorAndPositionWritesCloudProgress() {
         let book = makeBook(title: "EPUB", fileName: "epub.epub")
         let fakeStore = FakeCloudKeyValueStore()
