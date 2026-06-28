@@ -29,7 +29,8 @@ final class CloudReadingProgressStore {
         }
 
         guard let progress = progress(forStorageKey: CloudReadingProgress.metadataStorageKey(for: book)),
-              progress.format == book.format else { return nil }
+              progress.format == book.format,
+              progress.bookKey == CloudReadingProgress.metadataBookKey(for: book) else { return nil }
         return progress.migrated(to: book)
     }
 
@@ -38,7 +39,9 @@ final class CloudReadingProgressStore {
               let data = try? JSONEncoder().encode(progress),
               let value = String(data: data, encoding: .utf8) else { return }
         store.set(value, forKey: CloudReadingProgress.storageKey(for: book))
-        store.set(value, forKey: CloudReadingProgress.metadataStorageKey(for: book))
+        if CloudReadingProgress.bookKey(for: book) == CloudReadingProgress.metadataBookKey(for: book) {
+            store.set(value, forKey: CloudReadingProgress.metadataStorageKey(for: book))
+        }
         store.synchronize()
     }
 

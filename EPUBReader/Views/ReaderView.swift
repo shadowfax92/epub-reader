@@ -528,11 +528,7 @@ struct ReaderView: View {
             voiceId: bookStore.activeVoiceId,
             speed: currentSpeed,
             onPositionUpdate: { position in
-                bookStore.saveReadingPosition(
-                    book: book,
-                    position: position,
-                    locatorJSONString: bookStore.getEPUBLocatorJSONString(bookId: book.id)
-                )
+                bookStore.saveReadingPosition(bookId: book.id, position: position)
             }
         )
     }

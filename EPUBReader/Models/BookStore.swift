@@ -387,6 +387,7 @@ class BookStore: ObservableObject {
         let currentBook = currentBookMetadata(for: book)
         let baseline = localCloudProgressSnapshot(for: currentBook, backfillLegacy: true)
         saveReadingPosition(bookId: currentBook.id, position: position)
+        guard pageIndex != nil || locatorJSONString != nil else { return }
         let progress = mergedCloudProgress(
             for: currentBook,
             existing: baseline?.progress,

@@ -54,7 +54,7 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertNotEqual(CloudReadingProgress.storageKey(for: firstAuthor), CloudReadingProgress.storageKey(for: secondAuthor))
     }
 
-    func testProgressFallsBackToSameBookNameWhenFingerprintsDiffer() {
+    func testFingerprintedProgressDoesNotFallBackToDifferentFingerprint() {
         let first = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.epub", contentFingerprint: "abc")
         let second = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual-copy.epub", contentFingerprint: "def")
         let fakeStore = FakeCloudKeyValueStore()
@@ -65,8 +65,7 @@ final class CloudReadingProgressTests: XCTestCase {
             for: first
         )
 
-        XCTAssertEqual(cloudStore.progress(for: second)?.locatorJSONString, #"{"href":"chapter.xhtml"}"#)
-        XCTAssertEqual(cloudStore.progress(for: second)?.bookKey, CloudReadingProgress.bookKey(for: second))
+        XCTAssertNil(cloudStore.progress(for: second))
     }
 
     func testContentFingerprintFramesDirectoryEntries() throws {
@@ -480,7 +479,7 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertNil(epubProgress?.readingPosition)
     }
 
-    func testPDFReadingPositionWithoutTrustedPageKeepsManualPageProgress() {
+    func testPDFReadingPositionWithoutTrustedPageDoesNotUpdateCloudProgress() {
         let book = makeBook(title: "PDF Manual Page", fileName: "manual-page.pdf")
         let fakeStore = FakeCloudKeyValueStore()
         let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
@@ -501,7 +500,8 @@ final class CloudReadingProgressTests: XCTestCase {
         let progress = cloudStore.progress(for: book)
         XCTAssertEqual(progress?.pageIndex, 5)
         XCTAssertEqual(progress?.displayPage, 6)
-        XCTAssertEqual(progress?.readingPosition, stalePosition)
+        XCTAssertNil(progress?.readingPosition)
+        XCTAssertEqual(bookStore.getReadingPosition(bookId: book.id), stalePosition)
     }
 
     func testPDFPageCallbackDuringCloudJumpPreservesRemoteReadingPosition() {
@@ -600,7 +600,7 @@ final class CloudReadingProgressTests: XCTestCase {
 
         XCTAssertEqual(cloudStore.progress(for: newBook)?.pageIndex, 5)
         XCTAssertEqual(cloudStore.progress(for: newBook)?.bookKey, CloudReadingProgress.bookKey(for: newBook))
-        XCTAssertEqual(cloudStore.progress(for: oldBook)?.pageIndex, 5)
+        XCTAssertNil(cloudStore.progress(for: oldBook))
     }
 
     func testExternalCloudNotificationPublishesBookStoreChange() async {
