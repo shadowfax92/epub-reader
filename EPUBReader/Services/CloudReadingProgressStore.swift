@@ -23,13 +23,20 @@ final class CloudReadingProgressStore {
 
     /// Reads the iCloud progress record for the book, tolerating missing or corrupt values.
     func progress(for book: BookMetadata) -> CloudReadingProgress? {
-        var candidates: [CloudReadingProgress] = []
+        let currentBookKey = CloudReadingProgress.bookKey(for: book)
+        var exactCandidates: [CloudReadingProgress] = []
+        var fallbackCandidates: [CloudReadingProgress] = []
         for key in CloudReadingProgress.storageKeys(for: book) {
             guard let progress = progress(forStorageKey: key),
                   CloudReadingProgress.matches(progress, book: book) else { continue }
-            candidates.append(progress.bookKey == CloudReadingProgress.bookKey(for: book) ? progress : progress.migrated(to: book))
+            if progress.bookKey == currentBookKey {
+                exactCandidates.append(progress)
+            } else {
+                fallbackCandidates.append(progress.migrated(to: book))
+            }
         }
-        return candidates.max { $0.updatedAt < $1.updatedAt }
+        return exactCandidates.max { $0.updatedAt < $1.updatedAt }
+            ?? fallbackCandidates.max { $0.updatedAt < $1.updatedAt }
     }
 
     func save(_ progress: CloudReadingProgress, for book: BookMetadata) {

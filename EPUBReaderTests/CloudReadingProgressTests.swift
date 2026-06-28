@@ -91,7 +91,7 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.bookKey, CloudReadingProgress.bookKey(for: current))
     }
 
-    func testNewestMatchingProgressWinsAcrossCurrentAndFallbackKeys() {
+    func testExactFingerprintProgressWinsOverNewerMetadataFallback() {
         let current = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.pdf", contentFingerprint: "same-content")
         let fallback = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.pdf")
         let fakeStore = FakeCloudKeyValueStore()
@@ -107,7 +107,7 @@ final class CloudReadingProgressTests: XCTestCase {
         )
 
         let progress = cloudStore.progress(for: current)
-        XCTAssertEqual(progress?.pageIndex, 9)
+        XCTAssertEqual(progress?.pageIndex, 1)
         XCTAssertEqual(progress?.bookKey, CloudReadingProgress.bookKey(for: current))
     }
 
@@ -682,7 +682,7 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(cloudStore.progress(for: oldBook)?.pageIndex, 5)
     }
 
-    func testExistingBookFingerprintIsBackfilledBeforeCloudSave() throws {
+    func testCloudSaveDoesNotSynchronouslyBackfillExistingBookFingerprint() throws {
         let book = makeBook(title: "Existing", fileName: "existing-\(UUID().uuidString).pdf")
         let fakeStore = FakeCloudKeyValueStore()
         let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
@@ -708,7 +708,7 @@ final class CloudReadingProgressTests: XCTestCase {
         bookStore.savePDFPage(book: book, pageIndex: 5, updatedAt: Date(timeIntervalSince1970: 100))
 
         let current = try XCTUnwrap(bookStore.books.first)
-        XCTAssertNotNil(current.contentFingerprint)
+        XCTAssertNil(current.contentFingerprint)
         XCTAssertEqual(cloudStore.progress(for: current)?.pageIndex, 5)
         XCTAssertEqual(cloudStore.progress(for: current)?.bookKey, CloudReadingProgress.bookKey(for: current))
     }
