@@ -15,6 +15,7 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     var author: String
     let fileName: String
     var dateAdded: Date
+    var contentFingerprint: String?
 
     var fileURL: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

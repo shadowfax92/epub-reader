@@ -42,14 +42,22 @@ struct CloudReadingProgress: Codable, Equatable {
         return updatedAt > other.updatedAt
     }
 
-    /// Derives a short iCloud key from book name and format so imports with different UUIDs can match.
+    /// Derives a short iCloud key from stable book metadata so imports with different UUIDs can match.
     static func storageKey(for book: BookMetadata) -> String {
-        "rp.v1.\(digest(for: bookKey(for: book)))"
+        "rp.v2.\(digest(for: bookKey(for: book)))"
     }
 
     static func bookKey(for book: BookMetadata) -> String {
+        if let contentFingerprint = normalizedFingerprint(book.contentFingerprint) {
+            return "\(book.format.rawValue):fingerprint:\(contentFingerprint)"
+        }
+
         let title = normalized(book.title.isEmpty ? BookMetadata.fallbackTitle(forFileName: book.fileName) : book.title)
-        return "\(book.format.rawValue):\(title)"
+        let author = normalized(book.author)
+        let disambiguator = author.isEmpty || author == normalized("Unknown Author")
+            ? "file:\(normalized(BookMetadata.fallbackTitle(forFileName: book.fileName)))"
+            : "author:\(author)"
+        return "\(book.format.rawValue):title:\(title):\(disambiguator)"
     }
 
     private static func normalized(_ value: String) -> String {
@@ -64,5 +72,11 @@ struct CloudReadingProgress: Codable, Equatable {
     private static func digest(for value: String) -> String {
         let hash = SHA256.hash(data: Data(value.utf8))
         return hash.prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func normalizedFingerprint(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !value.isEmpty else { return nil }
+        return value
     }
 }
