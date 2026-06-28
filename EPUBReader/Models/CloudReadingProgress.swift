@@ -86,29 +86,13 @@ struct CloudReadingProgress: Codable, Equatable {
         storageKey(forBookKey: bookKey(for: book))
     }
 
-    static func metadataStorageKey(for book: BookMetadata) -> String {
-        storageKey(forBookKey: metadataBookKey(for: book))
-    }
-
     static func storageKey(forBookKey bookKey: String) -> String {
         "rp.v2.\(digest(for: bookKey))"
     }
 
     static func bookKey(for book: BookMetadata) -> String {
-        if let contentFingerprint = normalizedFingerprint(book.contentFingerprint) {
-            return "\(book.format.rawValue):fingerprint:\(contentFingerprint)"
-        }
-
-        return metadataBookKey(for: book)
-    }
-
-    static func metadataBookKey(for book: BookMetadata) -> String {
         let title = normalized(book.title.isEmpty ? BookMetadata.fallbackTitle(forFileName: book.fileName) : book.title)
-        let author = normalized(book.author)
-        guard !author.isEmpty, author != normalized("Unknown Author") else {
-            return "\(book.format.rawValue):title:\(title)"
-        }
-        return "\(book.format.rawValue):title:\(title):author:\(author)"
+        return "\(book.format.rawValue):title:\(title)"
     }
 
     private static func normalized(_ value: String) -> String {
@@ -123,12 +107,6 @@ struct CloudReadingProgress: Codable, Equatable {
     private static func digest(for value: String) -> String {
         let hash = SHA256.hash(data: Data(value.utf8))
         return hash.prefix(16).map { String(format: "%02x", $0) }.joined()
-    }
-
-    private static func normalizedFingerprint(_ value: String?) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              !value.isEmpty else { return nil }
-        return value
     }
 
     private init(

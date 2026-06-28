@@ -39,24 +39,24 @@ final class CloudReadingProgressTests: XCTestCase {
     }
 
     func testStorageKeyMatchesSameBookNameAcrossImports() {
-        let first = makeBook(title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", fileName: "left-hand.epub", contentFingerprint: "same")
-        let second = makeBook(title: "  the left hand of darkness  ", author: "ursula k le guin", fileName: "renamed.epub", contentFingerprint: "same")
-        let pdf = makeBook(title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", fileName: "left-hand.pdf", contentFingerprint: "same")
+        let first = makeBook(title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", fileName: "left-hand.epub")
+        let second = makeBook(title: "  the left hand of darkness  ", author: "Different Metadata", fileName: "renamed.epub")
+        let pdf = makeBook(title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", fileName: "left-hand.pdf")
 
         XCTAssertEqual(CloudReadingProgress.storageKey(for: first), CloudReadingProgress.storageKey(for: second))
         XCTAssertNotEqual(CloudReadingProgress.storageKey(for: first), CloudReadingProgress.storageKey(for: pdf))
     }
 
-    func testStorageKeyDisambiguatesSameTitleWithDifferentAuthors() {
+    func testStorageKeyIgnoresAuthorForSameBookName() {
         let firstAuthor = makeBook(title: "Selected Poems", author: "Author One", fileName: "selected.epub")
         let secondAuthor = makeBook(title: "Selected Poems", author: "Author Two", fileName: "selected-2.epub")
 
-        XCTAssertNotEqual(CloudReadingProgress.storageKey(for: firstAuthor), CloudReadingProgress.storageKey(for: secondAuthor))
+        XCTAssertEqual(CloudReadingProgress.storageKey(for: firstAuthor), CloudReadingProgress.storageKey(for: secondAuthor))
     }
 
-    func testFingerprintedProgressDoesNotFallBackToDifferentFingerprint() {
-        let first = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.epub", contentFingerprint: "abc")
-        let second = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual-copy.epub", contentFingerprint: "def")
+    func testCloudProgressMatchesSameBookNameAcrossImports() {
+        let first = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.epub")
+        let second = makeBook(title: "Manual", author: "Different Metadata", fileName: "manual-copy.epub")
         let fakeStore = FakeCloudKeyValueStore()
         let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
 
@@ -65,26 +65,7 @@ final class CloudReadingProgressTests: XCTestCase {
             for: first
         )
 
-        XCTAssertNil(cloudStore.progress(for: second))
-    }
-
-    func testContentFingerprintFramesDirectoryEntries() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CloudReadingProgressTests.\(UUID().uuidString)")
-        let first = root.appendingPathComponent("first.epub")
-        let second = root.appendingPathComponent("second.epub")
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
-        try Data([0x62, 0x63, 0x00, 0x64]).write(to: first.appendingPathComponent("a"))
-        try Data([0x62]).write(to: second.appendingPathComponent("a"))
-        try Data([0x64]).write(to: second.appendingPathComponent("c"))
-
-        XCTAssertNotEqual(
-            try BookStore.contentFingerprint(for: first),
-            try BookStore.contentFingerprint(for: second)
-        )
+        XCTAssertEqual(cloudStore.progress(for: second)?.locatorJSONString, #"{"href":"chapter.xhtml"}"#)
     }
 
     func testCorruptCloudValueDecodesAsMissingProgress() {
@@ -142,7 +123,7 @@ final class CloudReadingProgressTests: XCTestCase {
     }
 
     func testRemovingBookKeepsCloudProgressForReimport() {
-        let book = makeBook(title: "Deleted PDF", fileName: "deleted.pdf", contentFingerprint: "deleted")
+        let book = makeBook(title: "Deleted PDF", fileName: "deleted.pdf")
         let fakeStore = FakeCloudKeyValueStore()
         let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
         let bookStore = BookStore(
@@ -566,10 +547,10 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.format, .epub)
     }
 
-    func testMigratingFingerprintRemovesLegacyCloudProgressKey() {
+    func testSameBookNameProgressSurvivesFileNameChanges() {
         let id = UUID()
         let oldBook = makeBook(id: id, title: "Migrated", fileName: "migrated.epub")
-        let newBook = makeBook(id: id, title: "Migrated", fileName: "migrated.epub", contentFingerprint: "abc")
+        let newBook = makeBook(id: id, title: "Migrated", fileName: "renamed.epub")
         let fakeStore = FakeCloudKeyValueStore()
         let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
 
@@ -577,16 +558,15 @@ final class CloudReadingProgressTests: XCTestCase {
             CloudReadingProgress(book: oldBook, locatorJSONString: #"{"href":"chapter-3.xhtml"}"#, updatedAt: Date(timeIntervalSince1970: 100)),
             for: oldBook
         )
-        cloudStore.migrateProgress(from: oldBook, to: newBook)
 
         XCTAssertEqual(cloudStore.progress(for: newBook)?.locatorJSONString, #"{"href":"chapter-3.xhtml"}"#)
-        XCTAssertNil(cloudStore.progress(for: oldBook))
+        XCTAssertEqual(cloudStore.progress(for: oldBook)?.locatorJSONString, #"{"href":"chapter-3.xhtml"}"#)
     }
 
-    func testCloudSavesUseBackfilledMetadataForStaleBookValues() {
+    func testCloudSavesUseCurrentMetadataForStaleBookValues() {
         let id = UUID()
         let oldBook = makeBook(id: id, title: "Backfilled", fileName: "backfilled.pdf")
-        let newBook = makeBook(id: id, title: "Backfilled", fileName: "backfilled.pdf", contentFingerprint: "abc")
+        let newBook = makeBook(id: id, title: "Backfilled", fileName: "backfilled-renamed.pdf")
         let fakeStore = FakeCloudKeyValueStore()
         let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
         let bookStore = BookStore(
@@ -600,7 +580,7 @@ final class CloudReadingProgressTests: XCTestCase {
 
         XCTAssertEqual(cloudStore.progress(for: newBook)?.pageIndex, 5)
         XCTAssertEqual(cloudStore.progress(for: newBook)?.bookKey, CloudReadingProgress.bookKey(for: newBook))
-        XCTAssertNil(cloudStore.progress(for: oldBook))
+        XCTAssertEqual(cloudStore.progress(for: oldBook)?.pageIndex, 5)
     }
 
     func testExternalCloudNotificationPublishesBookStoreChange() async {
@@ -634,16 +614,14 @@ final class CloudReadingProgressTests: XCTestCase {
         id: UUID = UUID(),
         title: String,
         author: String = "Author",
-        fileName: String,
-        contentFingerprint: String? = nil
+        fileName: String
     ) -> BookMetadata {
         BookMetadata(
             id: id,
             title: title,
             author: author,
             fileName: fileName,
-            dateAdded: Date(timeIntervalSince1970: 0),
-            contentFingerprint: contentFingerprint
+            dateAdded: Date(timeIntervalSince1970: 0)
         )
     }
 }

@@ -1,4 +1,3 @@
-import CryptoKit
 import SwiftUI
 import PDFKit
 import ReadiumShared
@@ -12,7 +11,6 @@ class BookStore: ObservableObject {
     private let notificationCenter: NotificationCenter
     private let now: () -> Date
     nonisolated(unsafe) private var cloudProgressObserver: NSObjectProtocol?
-    private var fingerprintBackfillTask: Task<Void, Never>?
 
     var ttsProvider: TTSProviderType {
         get { TTSProviderType(rawValue: defaults.string(forKey: "ttsProvider") ?? "") ?? .elevenLabs }
@@ -126,11 +124,9 @@ class BookStore: ObservableObject {
         cloudProgressStore.synchronize()
         observeCloudProgressChanges()
         loadBooks()
-        startContentFingerprintBackfill()
     }
 
     deinit {
-        fingerprintBackfillTask?.cancel()
         if let cloudProgressObserver {
             notificationCenter.removeObserver(cloudProgressObserver)
         }
@@ -193,8 +189,7 @@ class BookStore: ObservableObject {
             title: title ?? BookMetadata.fallbackTitle(forFileName: fileName),
             author: author ?? "Unknown Author",
             fileName: fileName,
-            dateAdded: Date(),
-            contentFingerprint: try? await Self.contentFingerprintAsync(for: destURL)
+            dateAdded: Date()
         )
 
         books.insert(book, at: 0)
@@ -243,96 +238,6 @@ class BookStore: ObservableObject {
                 }
             }
         }
-    }
-
-    /// Computes a stable content identity for a copied book file or exploded EPUB directory.
-    nonisolated static func contentFingerprint(for url: URL) throws -> String {
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
-            throw CocoaError(.fileNoSuchFile)
-        }
-
-        var hasher = SHA256()
-        if isDirectory.boolValue {
-            let files = regularFiles(in: url)
-                .sorted { relativePath(for: $0, root: url) < relativePath(for: $1, root: url) }
-
-            appendString("directory-v1", to: &hasher)
-            appendLength(UInt64(files.count), to: &hasher)
-            for fileURL in files {
-                let relativePath = relativePath(for: fileURL, root: url)
-                appendString("file", to: &hasher)
-                appendString(relativePath, to: &hasher)
-                appendLength(try fileSize(for: fileURL), to: &hasher)
-                try update(&hasher, withContentsOf: fileURL)
-            }
-        } else {
-            appendString("file-v1", to: &hasher)
-            appendLength(try fileSize(for: url), to: &hasher)
-            try update(&hasher, withContentsOf: url)
-        }
-
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-
-    nonisolated static func contentFingerprintAsync(for url: URL) async throws -> String {
-        try await Task.detached(priority: .utility) {
-            try contentFingerprint(for: url)
-        }.value
-    }
-
-    nonisolated private static func update(_ hasher: inout SHA256, withContentsOf url: URL) throws {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-
-        while true {
-            let data = try handle.read(upToCount: 1024 * 1024) ?? Data()
-            if data.isEmpty { break }
-            hasher.update(data: data)
-        }
-    }
-
-    nonisolated private static func appendString(_ value: String, to hasher: inout SHA256) {
-        let data = Data(value.utf8)
-        appendLength(UInt64(data.count), to: &hasher)
-        hasher.update(data: data)
-    }
-
-    nonisolated private static func appendLength(_ value: UInt64, to hasher: inout SHA256) {
-        var bigEndian = value.bigEndian
-        let data = withUnsafeBytes(of: &bigEndian) { Data($0) }
-        hasher.update(data: data)
-    }
-
-    nonisolated private static func fileSize(for url: URL) throws -> UInt64 {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        guard let size = attributes[.size] as? NSNumber else {
-            throw CocoaError(.fileReadUnknown)
-        }
-        return size.uint64Value
-    }
-
-    nonisolated private static func regularFiles(in root: URL) -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        return enumerator.compactMap { item in
-            guard let url = item as? URL,
-                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
-                  values.isRegularFile == true else { return nil }
-            return url
-        }
-    }
-
-    nonisolated private static func relativePath(for fileURL: URL, root: URL) -> String {
-        let rootPath = root.standardizedFileURL.path
-        let filePath = fileURL.standardizedFileURL.path
-        let prefix = rootPath + "/"
-        guard filePath.hasPrefix(prefix) else { return fileURL.lastPathComponent }
-        return String(filePath.dropFirst(prefix.count))
     }
 
     func removeBook(_ book: BookMetadata) {
@@ -684,44 +589,6 @@ class BookStore: ObservableObject {
         guard let data = try? Data(contentsOf: metadataFileURL),
               let decoded = try? JSONDecoder().decode([BookMetadata].self, from: data) else { return }
         books = decoded
-    }
-
-    /// Fills stable sync identities for books imported before iCloud progress existed.
-    private func startContentFingerprintBackfill() {
-        let missing = books
-            .filter { $0.contentFingerprint == nil }
-        guard !missing.isEmpty else { return }
-
-        fingerprintBackfillTask?.cancel()
-        fingerprintBackfillTask = Task { [weak self] in
-            for book in missing {
-                guard !Task.isCancelled,
-                      let fingerprint = try? await Self.contentFingerprintAsync(for: book.fileURL) else { continue }
-                guard let self else { return }
-                if let index = self.books.firstIndex(where: { $0.id == book.id }),
-                   self.books[index].contentFingerprint == nil {
-                    let oldBook = self.books[index]
-                    var newBook = oldBook
-                    newBook.contentFingerprint = fingerprint
-                    self.migrateCloudProgressIdentity(from: oldBook, to: newBook)
-                    self.books[index] = newBook
-                    self.saveBooks()
-                }
-            }
-        }
-    }
-
-    private func migrateCloudProgressIdentity(from oldBook: BookMetadata, to newBook: BookMetadata) {
-        cloudProgressStore.migrateProgress(from: oldBook, to: newBook)
-        migrateLocalCloudProgress(from: oldBook, to: newBook)
-    }
-
-    private func migrateLocalCloudProgress(from oldBook: BookMetadata, to newBook: BookMetadata) {
-        guard CloudReadingProgress.storageKey(for: oldBook) != CloudReadingProgress.storageKey(for: newBook),
-              let progress = localCloudProgress(bookId: oldBook.id),
-              progress.bookKey == CloudReadingProgress.bookKey(for: oldBook) else { return }
-        let wasLegacyBaseline = defaults.bool(forKey: legacyCloudProgressBaselineKey(bookId: oldBook.id))
-        saveLocalCloudProgress(progress.migrated(to: newBook), bookId: oldBook.id, legacyBaseline: wasLegacyBaseline)
     }
 
     private func saveBooks() {
