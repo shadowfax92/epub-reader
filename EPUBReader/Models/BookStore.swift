@@ -574,7 +574,21 @@ class BookStore: ObservableObject {
     }
 
     private func currentBookMetadata(for book: BookMetadata) -> BookMetadata {
-        books.first { $0.id == book.id } ?? book
+        guard let index = books.firstIndex(where: { $0.id == book.id }) else { return book }
+        if let updated = bookWithBackfilledFingerprint(books[index]) {
+            books[index] = updated
+            saveBooks()
+            return updated
+        }
+        return books[index]
+    }
+
+    private func bookWithBackfilledFingerprint(_ book: BookMetadata) -> BookMetadata? {
+        guard book.contentFingerprint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true,
+              let fingerprint = try? Self.contentFingerprint(for: book.fileURL) else { return nil }
+        var updated = book
+        updated.contentFingerprint = fingerprint
+        return updated
     }
 
     // MARK: - Highlights

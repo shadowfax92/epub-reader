@@ -91,6 +91,26 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.bookKey, CloudReadingProgress.bookKey(for: current))
     }
 
+    func testNewestMatchingProgressWinsAcrossCurrentAndFallbackKeys() {
+        let current = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.pdf", contentFingerprint: "same-content")
+        let fallback = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+
+        cloudStore.save(
+            CloudReadingProgress(book: current, pageIndex: 1, updatedAt: Date(timeIntervalSince1970: 100)),
+            for: current
+        )
+        cloudStore.save(
+            CloudReadingProgress(book: fallback, pageIndex: 9, updatedAt: Date(timeIntervalSince1970: 200)),
+            for: fallback
+        )
+
+        let progress = cloudStore.progress(for: current)
+        XCTAssertEqual(progress?.pageIndex, 9)
+        XCTAssertEqual(progress?.bookKey, CloudReadingProgress.bookKey(for: current))
+    }
+
     func testCorruptCloudValueDecodesAsMissingProgress() {
         let book = makeBook(title: "Broken", fileName: "broken.epub")
         let fakeStore = FakeCloudKeyValueStore()
@@ -602,6 +622,37 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(cloudStore.progress(for: newBook)?.pageIndex, 5)
         XCTAssertEqual(cloudStore.progress(for: newBook)?.bookKey, CloudReadingProgress.bookKey(for: newBook))
         XCTAssertEqual(cloudStore.progress(for: oldBook)?.pageIndex, 5)
+    }
+
+    func testExistingBookFingerprintIsBackfilledBeforeCloudSave() throws {
+        let book = makeBook(title: "Existing", fileName: "existing-\(UUID().uuidString).pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+        try FileManager.default.createDirectory(
+            at: book.fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("existing bytes".utf8).write(to: book.fileURL)
+        bookStore.books = [book]
+        defer {
+            if let current = bookStore.books.first {
+                bookStore.removeBook(current)
+            } else {
+                try? FileManager.default.removeItem(at: book.fileURL)
+            }
+        }
+
+        bookStore.savePDFPage(book: book, pageIndex: 5, updatedAt: Date(timeIntervalSince1970: 100))
+
+        let current = try XCTUnwrap(bookStore.books.first)
+        XCTAssertNotNil(current.contentFingerprint)
+        XCTAssertEqual(cloudStore.progress(for: current)?.pageIndex, 5)
+        XCTAssertEqual(cloudStore.progress(for: current)?.bookKey, CloudReadingProgress.bookKey(for: current))
     }
 
     func testExternalCloudNotificationPublishesBookStoreChange() async {
