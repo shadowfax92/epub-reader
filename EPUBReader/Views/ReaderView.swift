@@ -28,6 +28,7 @@ struct ReaderView: View {
     @State private var wordRangesByResourceHref: [String: EPUBResourceWordRange] = [:]
     @State private var currentVisibleAutoAdvanceTarget: EPUBVisibleAutoAdvanceTarget?
     @State private var lastAutoAdvanceTarget: EPUBAutoAdvanceTarget?
+    @State private var suppressNextLocatorCloudOverwrite = true
 
     private var theme: ReaderTheme { bookStore.readerTheme }
 
@@ -406,10 +407,13 @@ struct ReaderView: View {
                         currentVisibleAutoAdvanceTarget = visibleAutoAdvanceTarget(from: locator)
                     }
                     if let jsonString = locator.jsonString {
+                        let allowReplacingNewerRemote = !suppressNextLocatorCloudOverwrite
+                        suppressNextLocatorCloudOverwrite = false
                         bookStore.saveEPUBLocator(
                             book: book,
                             locatorJSONString: jsonString,
-                            displayPage: displayPage(from: locator)
+                            displayPage: displayPage(from: locator),
+                            allowReplacingNewerRemote: allowReplacingNewerRemote
                         )
                     }
                 },
@@ -680,22 +684,29 @@ struct ReaderView: View {
 
     private func jumpToCloudProgress(_ progress: CloudReadingProgress) {
         guard progress.format == .epub else { return }
-        bookStore.applyCloudProgressLocally(progress, for: book)
-
-        if let position = progress.readingPosition {
-            restorePlaybackPosition(position)
-        }
 
         if let locatorJSONString = progress.locatorJSONString,
-           let locator = try? Locator(jsonString: locatorJSONString) {
-            if progress.readingPosition == nil,
-               let position = playbackPosition(for: locator) {
-                bookStore.saveReadingPosition(bookId: book.id, position: position)
-                restorePlaybackPosition(position)
-            }
+           let locator = try? Locator(jsonString: locatorJSONString),
+           let nav = navigator {
+            let derivedPosition = progress.readingPosition == nil ? playbackPosition(for: locator) : nil
             navigationTask?.cancel()
+            suppressNextLocatorCloudOverwrite = true
             navigationTask = Task {
-                _ = await navigator?.go(to: locator, options: NavigatorGoOptions(animated: true))
+                guard await nav.go(to: locator, options: NavigatorGoOptions(animated: true)) else {
+                    await MainActor.run {
+                        suppressNextLocatorCloudOverwrite = false
+                    }
+                    return
+                }
+                await MainActor.run {
+                    bookStore.applyCloudProgressLocally(progress, for: book)
+                    if let position = progress.readingPosition ?? derivedPosition {
+                        if progress.readingPosition == nil {
+                            bookStore.saveReadingPosition(bookId: book.id, position: position)
+                        }
+                        restorePlaybackPosition(position)
+                    }
+                }
             }
             return
         }
@@ -703,6 +714,8 @@ struct ReaderView: View {
         if let position = progress.readingPosition,
            let parsedBook,
            let paragraph = parsedBook.flatParagraphs[safe: position.paragraphIndex] {
+            bookStore.applyCloudProgressLocally(progress, for: book)
+            restorePlaybackPosition(position)
             jumpToPosition(paragraphId: paragraph.id, wordIndex: position.globalWordIndex)
         }
     }

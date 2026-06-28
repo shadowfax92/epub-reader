@@ -444,26 +444,26 @@ struct PDFReaderView: View {
 
     private func jumpToCloudProgress(_ progress: CloudReadingProgress) {
         guard progress.format == .pdf else { return }
-        bookStore.applyCloudProgressLocally(progress, for: book)
-
-        if let position = progress.readingPosition {
-            restorePlaybackPosition(position)
-        }
 
         if let pageIndex = progress.pageIndex {
-            if progress.readingPosition == nil,
-               let position = playbackPosition(forPage: pageIndex) {
-                bookStore.saveReadingPosition(bookId: book.id, position: position)
+            let derivedPosition = progress.readingPosition == nil ? playbackPosition(forPage: pageIndex) : nil
+            guard proxy.goToPage(pageIndex) else { return }
+            bookStore.applyCloudProgressLocally(progress, for: book)
+            if let position = progress.readingPosition ?? derivedPosition {
+                if progress.readingPosition == nil {
+                    bookStore.saveReadingPosition(bookId: book.id, position: position)
+                }
                 restorePlaybackPosition(position)
             }
-            proxy.goToPage(pageIndex)
             return
         }
 
         if let position = progress.readingPosition,
            let parsedPDF,
            let location = parsedPDF.wordLocations[safe: position.globalWordIndex] {
-            proxy.scrollTo(pageIndex: location.pageIndex, range: location.range)
+            guard proxy.scrollTo(pageIndex: location.pageIndex, range: location.range) else { return }
+            bookStore.applyCloudProgressLocally(progress, for: book)
+            restorePlaybackPosition(position)
         }
     }
 

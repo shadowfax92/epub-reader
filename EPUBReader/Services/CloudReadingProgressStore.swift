@@ -23,13 +23,14 @@ final class CloudReadingProgressStore {
 
     /// Reads the iCloud progress record for the book, tolerating missing or corrupt values.
     func progress(for book: BookMetadata) -> CloudReadingProgress? {
-        guard let value = store.string(forKey: CloudReadingProgress.storageKey(for: book)),
-              let data = value.data(using: .utf8),
-              let progress = try? JSONDecoder().decode(CloudReadingProgress.self, from: data),
-              progress.bookKey == CloudReadingProgress.bookKey(for: book) else {
-            return nil
+        if let progress = progress(forStorageKey: CloudReadingProgress.storageKey(for: book)),
+           progress.bookKey == CloudReadingProgress.bookKey(for: book) {
+            return progress
         }
-        return progress
+
+        guard let progress = progress(forStorageKey: CloudReadingProgress.metadataStorageKey(for: book)),
+              progress.format == book.format else { return nil }
+        return progress.migrated(to: book)
     }
 
     func save(_ progress: CloudReadingProgress, for book: BookMetadata) {
@@ -37,6 +38,7 @@ final class CloudReadingProgressStore {
               let data = try? JSONEncoder().encode(progress),
               let value = String(data: data, encoding: .utf8) else { return }
         store.set(value, forKey: CloudReadingProgress.storageKey(for: book))
+        store.set(value, forKey: CloudReadingProgress.metadataStorageKey(for: book))
         store.synchronize()
     }
 
@@ -50,25 +52,36 @@ final class CloudReadingProgressStore {
         let migrated = oldProgress.migrated(to: newBook)
         if let existing = progress(for: newBook),
            existing.isNewer(than: migrated) {
-            store.removeObject(forKey: oldStorageKey)
+            removeMigratedSourceKey(oldStorageKey, newBook: newBook)
             store.synchronize()
             return
         }
 
-        guard let data = try? JSONEncoder().encode(migrated),
-              let value = String(data: data, encoding: .utf8) else { return }
-        store.set(value, forKey: newStorageKey)
-        store.removeObject(forKey: oldStorageKey)
+        save(migrated, for: newBook)
+        removeMigratedSourceKey(oldStorageKey, newBook: newBook)
         store.synchronize()
     }
 
     func removeProgress(for book: BookMetadata) {
         store.removeObject(forKey: CloudReadingProgress.storageKey(for: book))
+        store.removeObject(forKey: CloudReadingProgress.metadataStorageKey(for: book))
         store.synchronize()
     }
 
     @discardableResult
     func synchronize() -> Bool {
         store.synchronize()
+    }
+
+    private func progress(forStorageKey key: String) -> CloudReadingProgress? {
+        guard let value = store.string(forKey: key),
+              let data = value.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(CloudReadingProgress.self, from: data)
+    }
+
+    private func removeMigratedSourceKey(_ oldStorageKey: String, newBook: BookMetadata) {
+        guard oldStorageKey != CloudReadingProgress.storageKey(for: newBook),
+              oldStorageKey != CloudReadingProgress.metadataStorageKey(for: newBook) else { return }
+        store.removeObject(forKey: oldStorageKey)
     }
 }

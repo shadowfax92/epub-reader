@@ -378,7 +378,13 @@ class BookStore: ObservableObject {
         return try? JSONDecoder().decode(ReadingPosition.self, from: data)
     }
 
-    func saveEPUBLocator(book: BookMetadata, locatorJSONString: String, displayPage: Int?, updatedAt: Date = Date()) {
+    func saveEPUBLocator(
+        book: BookMetadata,
+        locatorJSONString: String,
+        displayPage: Int?,
+        updatedAt: Date = Date(),
+        allowReplacingNewerRemote: Bool = true
+    ) {
         let currentBook = currentBookMetadata(for: book)
         let baseline = localCloudProgressSnapshot(for: currentBook, backfillLegacy: true)
         defaults.set(locatorJSONString, forKey: "locator_\(currentBook.id.uuidString)")
@@ -389,7 +395,12 @@ class BookStore: ObservableObject {
             locatorJSONString: locatorJSONString,
             updatedAt: updatedAt
         )
-        saveCloudProgress(progress, for: currentBook, baseline: baseline, allowReplacingNewerRemote: false)
+        saveCloudProgress(
+            progress,
+            for: currentBook,
+            baseline: baseline,
+            allowReplacingNewerRemote: allowReplacingNewerRemote
+        )
     }
 
     func getEPUBLocatorJSONString(bookId: UUID) -> String? {

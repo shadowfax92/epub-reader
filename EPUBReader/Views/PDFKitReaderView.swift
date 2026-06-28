@@ -13,19 +13,23 @@ struct PDFWordHighlight: Equatable {
 final class PDFViewProxy {
     weak var pdfView: PDFView?
 
-    func goToPage(_ pageIndex: Int) {
+    @discardableResult
+    func goToPage(_ pageIndex: Int) -> Bool {
         guard let pdfView, let document = pdfView.document,
-              let page = document.page(at: pageIndex) else { return }
+              let page = document.page(at: pageIndex) else { return false }
         pdfView.go(to: page)
+        return true
     }
 
-    func scrollTo(pageIndex: Int, range: NSRange) {
+    @discardableResult
+    func scrollTo(pageIndex: Int, range: NSRange) -> Bool {
         guard let pdfView, let document = pdfView.document,
               let page = document.page(at: pageIndex),
-              let selection = page.selection(for: range) else { return }
+              let selection = page.selection(for: range) else { return false }
         let bounds = selection.bounds(for: page)
-        guard !bounds.isNull else { return }
+        guard !bounds.isNull else { return false }
         pdfView.go(to: bounds.insetBy(dx: -20, dy: -60), on: page)
+        return true
     }
 
     func currentSelectionInfo() -> (text: String, pageIndex: Int, startOffset: Int?)? {

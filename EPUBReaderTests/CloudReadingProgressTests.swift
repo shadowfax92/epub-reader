@@ -47,14 +47,26 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertNotEqual(CloudReadingProgress.storageKey(for: first), CloudReadingProgress.storageKey(for: pdf))
     }
 
-    func testStorageKeyDisambiguatesSameTitleWithDifferentAuthorsOrContent() {
+    func testStorageKeyDisambiguatesSameTitleWithDifferentAuthors() {
         let firstAuthor = makeBook(title: "Selected Poems", author: "Author One", fileName: "selected.epub")
         let secondAuthor = makeBook(title: "Selected Poems", author: "Author Two", fileName: "selected-2.epub")
-        let firstContent = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.epub", contentFingerprint: "abc")
-        let secondContent = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.epub", contentFingerprint: "def")
 
         XCTAssertNotEqual(CloudReadingProgress.storageKey(for: firstAuthor), CloudReadingProgress.storageKey(for: secondAuthor))
-        XCTAssertNotEqual(CloudReadingProgress.storageKey(for: firstContent), CloudReadingProgress.storageKey(for: secondContent))
+    }
+
+    func testProgressFallsBackToSameBookNameWhenFingerprintsDiffer() {
+        let first = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual.epub", contentFingerprint: "abc")
+        let second = makeBook(title: "Manual", author: "Unknown Author", fileName: "manual-copy.epub", contentFingerprint: "def")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+
+        cloudStore.save(
+            CloudReadingProgress(book: first, locatorJSONString: #"{"href":"chapter.xhtml"}"#, updatedAt: Date(timeIntervalSince1970: 100)),
+            for: first
+        )
+
+        XCTAssertEqual(cloudStore.progress(for: second)?.locatorJSONString, #"{"href":"chapter.xhtml"}"#)
+        XCTAssertEqual(cloudStore.progress(for: second)?.bookKey, CloudReadingProgress.bookKey(for: second))
     }
 
     func testCorruptCloudValueDecodesAsMissingProgress() {
@@ -209,11 +221,48 @@ final class CloudReadingProgressTests: XCTestCase {
             book: book,
             locatorJSONString: #"{"href":"chapter-2.xhtml"}"#,
             displayPage: 2,
-            updatedAt: Date(timeIntervalSince1970: 300)
+            updatedAt: Date(timeIntervalSince1970: 300),
+            allowReplacingNewerRemote: false
         )
 
         XCTAssertEqual(cloudStore.progress(for: book)?.locatorJSONString, #"{"href":"chapter-9.xhtml"}"#)
         XCTAssertEqual(bookStore.newerCloudProgress(for: book)?.locatorJSONString, #"{"href":"chapter-9.xhtml"}"#)
+    }
+
+    func testAllowedEPUBLocatorCanOverwriteNewerRemoteProgress() {
+        let book = makeBook(title: "Manual EPUB", fileName: "manual.epub")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+
+        bookStore.saveEPUBLocator(
+            book: book,
+            locatorJSONString: #"{"href":"chapter-1.xhtml"}"#,
+            displayPage: 1,
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        cloudStore.save(
+            CloudReadingProgress(
+                book: book,
+                locatorJSONString: #"{"href":"chapter-9.xhtml"}"#,
+                updatedAt: Date(timeIntervalSince1970: 200)
+            ),
+            for: book
+        )
+
+        bookStore.saveEPUBLocator(
+            book: book,
+            locatorJSONString: #"{"href":"chapter-2.xhtml"}"#,
+            displayPage: 2,
+            updatedAt: Date(timeIntervalSince1970: 300)
+        )
+
+        XCTAssertEqual(cloudStore.progress(for: book)?.locatorJSONString, #"{"href":"chapter-2.xhtml"}"#)
+        XCTAssertNil(bookStore.newerCloudProgress(for: book))
     }
 
     func testPlaybackPositionCanOverwriteNewerRemoteProgress() {
@@ -421,8 +470,8 @@ final class CloudReadingProgressTests: XCTestCase {
         )
         cloudStore.migrateProgress(from: oldBook, to: newBook)
 
-        XCTAssertNil(cloudStore.progress(for: oldBook))
         XCTAssertEqual(cloudStore.progress(for: newBook)?.locatorJSONString, #"{"href":"chapter-3.xhtml"}"#)
+        XCTAssertEqual(cloudStore.progress(for: oldBook)?.locatorJSONString, #"{"href":"chapter-3.xhtml"}"#)
     }
 
     func testCloudSavesUseBackfilledMetadataForStaleBookValues() {
@@ -440,8 +489,9 @@ final class CloudReadingProgressTests: XCTestCase {
 
         bookStore.savePDFPage(book: oldBook, pageIndex: 5, updatedAt: Date(timeIntervalSince1970: 100))
 
-        XCTAssertNil(cloudStore.progress(for: oldBook))
         XCTAssertEqual(cloudStore.progress(for: newBook)?.pageIndex, 5)
+        XCTAssertEqual(cloudStore.progress(for: newBook)?.bookKey, CloudReadingProgress.bookKey(for: newBook))
+        XCTAssertEqual(cloudStore.progress(for: oldBook)?.pageIndex, 5)
     }
 
     func testExternalCloudNotificationPublishesBookStoreChange() async {

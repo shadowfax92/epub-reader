@@ -73,6 +73,10 @@ struct CloudReadingProgress: Codable, Equatable {
         storageKey(forBookKey: bookKey(for: book))
     }
 
+    static func metadataStorageKey(for book: BookMetadata) -> String {
+        storageKey(forBookKey: metadataBookKey(for: book))
+    }
+
     static func storageKey(forBookKey bookKey: String) -> String {
         "rp.v2.\(digest(for: bookKey))"
     }
@@ -88,10 +92,10 @@ struct CloudReadingProgress: Codable, Equatable {
     static func metadataBookKey(for book: BookMetadata) -> String {
         let title = normalized(book.title.isEmpty ? BookMetadata.fallbackTitle(forFileName: book.fileName) : book.title)
         let author = normalized(book.author)
-        let disambiguator = author.isEmpty || author == normalized("Unknown Author")
-            ? "file:\(normalized(BookMetadata.fallbackTitle(forFileName: book.fileName)))"
-            : "author:\(author)"
-        return "\(book.format.rawValue):title:\(title):\(disambiguator)"
+        guard !author.isEmpty, author != normalized("Unknown Author") else {
+            return "\(book.format.rawValue):title:\(title)"
+        }
+        return "\(book.format.rawValue):title:\(title):author:\(author)"
     }
 
     private static func normalized(_ value: String) -> String {
