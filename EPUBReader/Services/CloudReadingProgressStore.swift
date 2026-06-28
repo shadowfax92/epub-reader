@@ -40,6 +40,28 @@ final class CloudReadingProgressStore {
         store.synchronize()
     }
 
+    /// Moves an existing synced record when a legacy book gains a stronger stable identity.
+    func migrateProgress(from oldBook: BookMetadata, to newBook: BookMetadata) {
+        let oldStorageKey = CloudReadingProgress.storageKey(for: oldBook)
+        let newStorageKey = CloudReadingProgress.storageKey(for: newBook)
+        guard oldStorageKey != newStorageKey,
+              let oldProgress = progress(for: oldBook) else { return }
+
+        let migrated = oldProgress.migrated(to: newBook)
+        if let existing = progress(for: newBook),
+           existing.isNewer(than: migrated) {
+            store.removeObject(forKey: oldStorageKey)
+            store.synchronize()
+            return
+        }
+
+        guard let data = try? JSONEncoder().encode(migrated),
+              let value = String(data: data, encoding: .utf8) else { return }
+        store.set(value, forKey: newStorageKey)
+        store.removeObject(forKey: oldStorageKey)
+        store.synchronize()
+    }
+
     func removeProgress(for book: BookMetadata) {
         store.removeObject(forKey: CloudReadingProgress.storageKey(for: book))
         store.synchronize()

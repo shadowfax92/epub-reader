@@ -55,9 +55,26 @@ struct CloudReadingProgress: Codable, Equatable {
         )
     }
 
+    func migrated(to book: BookMetadata) -> CloudReadingProgress {
+        CloudReadingProgress(
+            bookKey: Self.bookKey(for: book),
+            bookTitle: book.title,
+            format: book.format,
+            pageIndex: pageIndex,
+            displayPage: displayPage,
+            locatorJSONString: locatorJSONString,
+            readingPosition: readingPosition,
+            updatedAt: updatedAt
+        )
+    }
+
     /// Derives a short iCloud key from stable book metadata so imports with different UUIDs can match.
     static func storageKey(for book: BookMetadata) -> String {
-        "rp.v2.\(digest(for: bookKey(for: book)))"
+        storageKey(forBookKey: bookKey(for: book))
+    }
+
+    static func storageKey(forBookKey bookKey: String) -> String {
+        "rp.v2.\(digest(for: bookKey))"
     }
 
     static func bookKey(for book: BookMetadata) -> String {
@@ -65,6 +82,10 @@ struct CloudReadingProgress: Codable, Equatable {
             return "\(book.format.rawValue):fingerprint:\(contentFingerprint)"
         }
 
+        return metadataBookKey(for: book)
+    }
+
+    static func metadataBookKey(for book: BookMetadata) -> String {
         let title = normalized(book.title.isEmpty ? BookMetadata.fallbackTitle(forFileName: book.fileName) : book.title)
         let author = normalized(book.author)
         let disambiguator = author.isEmpty || author == normalized("Unknown Author")
