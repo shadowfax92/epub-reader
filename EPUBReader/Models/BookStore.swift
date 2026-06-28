@@ -9,7 +9,6 @@ class BookStore: ObservableObject {
     private let defaults: UserDefaults
     private let cloudProgressStore: CloudReadingProgressStore
     private let notificationCenter: NotificationCenter
-    private let now: () -> Date
     nonisolated(unsafe) private var cloudProgressObserver: NSObjectProtocol?
 
     var ttsProvider: TTSProviderType {
@@ -108,13 +107,11 @@ class BookStore: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         cloudProgressStore: CloudReadingProgressStore = CloudReadingProgressStore(),
-        notificationCenter: NotificationCenter = .default,
-        now: @escaping () -> Date = Date.init
+        notificationCenter: NotificationCenter = .default
     ) {
         self.defaults = defaults
         self.cloudProgressStore = cloudProgressStore
         self.notificationCenter = notificationCenter
-        self.now = now
 
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         booksDirectoryURL = docs.appendingPathComponent("Books")
@@ -516,7 +513,7 @@ class BookStore: ObservableObject {
             pageIndex: pageIndex,
             locatorJSONString: locatorJSONString,
             readingPosition: readingPosition,
-            updatedAt: now()
+            updatedAt: Date(timeIntervalSince1970: 0)
         )
     }
 

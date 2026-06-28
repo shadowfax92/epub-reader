@@ -92,7 +92,11 @@ struct CloudReadingProgress: Codable, Equatable {
 
     static func bookKey(for book: BookMetadata) -> String {
         let title = normalized(book.title.isEmpty ? BookMetadata.fallbackTitle(forFileName: book.fileName) : book.title)
-        return "\(book.format.rawValue):title:\(title)"
+        let author = normalized(book.author)
+        guard !author.isEmpty, author != normalized("Unknown Author") else {
+            return "\(book.format.rawValue):title:\(title)"
+        }
+        return "\(book.format.rawValue):title:\(title):author:\(author)"
     }
 
     private static func normalized(_ value: String) -> String {
