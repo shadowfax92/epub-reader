@@ -528,7 +528,15 @@ struct ReaderView: View {
             voiceId: bookStore.activeVoiceId,
             speed: currentSpeed,
             onPositionUpdate: { position in
-                bookStore.saveReadingPosition(bookId: book.id, position: position)
+                if let locatorJSONString = playbackLocator(for: position)?.jsonString {
+                    bookStore.saveReadingPosition(
+                        book: book,
+                        position: position,
+                        locatorJSONString: locatorJSONString
+                    )
+                } else {
+                    bookStore.saveReadingPosition(bookId: book.id, position: position)
+                }
             }
         )
     }
@@ -757,12 +765,25 @@ struct ReaderView: View {
         guard let nav = navigator, let parsedBook else { return }
 
         guard let paragraph = parsedBook.paragraph(withId: paragraphId),
-              let hrefURL = AnyURL(string: paragraph.resourceHref) else { return }
+              let locator = locator(for: paragraph, wordIndex: wordIndex) else { return }
 
+        navigationTask?.cancel()
+        navigationTask = Task {
+            _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+        }
+    }
+
+    private func playbackLocator(for position: ReadingPosition) -> Locator? {
+        guard let paragraph = parsedBook?.flatParagraphs[safe: position.paragraphIndex] else { return nil }
+        return locator(for: paragraph, wordIndex: position.globalWordIndex)
+    }
+
+    private func locator(for paragraph: BookParagraph, wordIndex: Int) -> Locator? {
+        guard let hrefURL = AnyURL(string: paragraph.resourceHref) else { return nil }
         let wordPosition = paragraph.position(ofGlobalWordId: wordIndex) ?? 0
         let ctx = TTSHighlightHelper.buildTextContext(words: paragraph.words, wordPosition: wordPosition)
 
-        let locator = Locator(
+        return Locator(
             href: hrefURL,
             mediaType: .xhtml,
             text: Locator.Text(
@@ -771,11 +792,6 @@ struct ReaderView: View {
                 highlight: ctx.highlight
             )
         )
-
-        navigationTask?.cancel()
-        navigationTask = Task {
-            _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
-        }
     }
 
     // MARK: - Highlights

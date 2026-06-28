@@ -566,7 +566,7 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.format, .epub)
     }
 
-    func testMigratingFingerprintCopiesLegacyCloudProgressKey() {
+    func testMigratingFingerprintRemovesLegacyCloudProgressKey() {
         let id = UUID()
         let oldBook = makeBook(id: id, title: "Migrated", fileName: "migrated.epub")
         let newBook = makeBook(id: id, title: "Migrated", fileName: "migrated.epub", contentFingerprint: "abc")
@@ -580,7 +580,7 @@ final class CloudReadingProgressTests: XCTestCase {
         cloudStore.migrateProgress(from: oldBook, to: newBook)
 
         XCTAssertEqual(cloudStore.progress(for: newBook)?.locatorJSONString, #"{"href":"chapter-3.xhtml"}"#)
-        XCTAssertEqual(cloudStore.progress(for: oldBook)?.locatorJSONString, #"{"href":"chapter-3.xhtml"}"#)
+        XCTAssertNil(cloudStore.progress(for: oldBook))
     }
 
     func testCloudSavesUseBackfilledMetadataForStaleBookValues() {

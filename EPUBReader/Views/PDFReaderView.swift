@@ -80,6 +80,7 @@ struct PDFReaderView: View {
         .task { await loadBook() }
         .onDisappear {
             playbackManager.stop()
+            playbackManager.clearCallbacks()
         }
         .onChange(of: playbackManager.isPlaying) { _, playing in
             if playing {

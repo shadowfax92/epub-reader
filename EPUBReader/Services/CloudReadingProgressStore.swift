@@ -83,8 +83,7 @@ final class CloudReadingProgressStore {
     }
 
     private func removeMigratedSourceKey(_ oldStorageKey: String, newBook: BookMetadata) {
-        guard oldStorageKey != CloudReadingProgress.storageKey(for: newBook),
-              oldStorageKey != CloudReadingProgress.metadataStorageKey(for: newBook) else { return }
+        guard oldStorageKey != CloudReadingProgress.storageKey(for: newBook) else { return }
         store.removeObject(forKey: oldStorageKey)
     }
 }
