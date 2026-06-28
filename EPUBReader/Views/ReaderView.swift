@@ -688,6 +688,11 @@ struct ReaderView: View {
 
         if let locatorJSONString = progress.locatorJSONString,
            let locator = try? Locator(jsonString: locatorJSONString) {
+            if progress.readingPosition == nil,
+               let position = playbackPosition(for: locator) {
+                bookStore.saveReadingPosition(bookId: book.id, position: position)
+                restorePlaybackPosition(position)
+            }
             navigationTask?.cancel()
             navigationTask = Task {
                 _ = await navigator?.go(to: locator, options: NavigatorGoOptions(animated: true))
@@ -700,6 +705,19 @@ struct ReaderView: View {
            let paragraph = parsedBook.flatParagraphs[safe: position.paragraphIndex] {
             jumpToPosition(paragraphId: paragraph.id, wordIndex: position.globalWordIndex)
         }
+    }
+
+    private func playbackPosition(for locator: Locator) -> ReadingPosition? {
+        guard let parsedBook else { return nil }
+        let href = locator.href.string
+        guard let match = parsedBook.flatParagraphs.enumerated().first(where: { _, paragraph in
+            TTSHighlightHelper.hrefsMatch(paragraph.resourceHref, href)
+        }) else { return nil }
+        return ReadingPosition(
+            chapterIndex: match.element.chapterIndex,
+            paragraphIndex: match.offset,
+            globalWordIndex: match.element.words.first?.id ?? 0
+        )
     }
 
     private func restorePlaybackPosition(_ position: ReadingPosition) {

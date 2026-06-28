@@ -101,6 +101,73 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.format, .pdf)
     }
 
+    func testLocalSaveDoesNotOverwriteNewerRemoteProgress() {
+        let book = makeBook(title: "Conflict", fileName: "conflict.pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+
+        bookStore.savePDFPage(book: book, pageIndex: 1, updatedAt: Date(timeIntervalSince1970: 100))
+        cloudStore.save(
+            CloudReadingProgress(book: book, pageIndex: 6, updatedAt: Date(timeIntervalSince1970: 200)),
+            for: book
+        )
+
+        bookStore.savePDFPage(book: book, pageIndex: 2, updatedAt: Date(timeIntervalSince1970: 300))
+
+        XCTAssertEqual(bookStore.getPDFPage(bookId: book.id), 2)
+        XCTAssertEqual(cloudStore.progress(for: book)?.pageIndex, 6)
+        XCTAssertEqual(bookStore.newerCloudProgress(for: book)?.pageIndex, 6)
+    }
+
+    func testPageAndLocatorOnlyUpdatesDoNotCarryStalePlaybackPosition() {
+        let pdf = makeBook(title: "PDF Position", fileName: "position.pdf")
+        let epub = makeBook(title: "EPUB Position", fileName: "position.epub")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+        let oldPosition = ReadingPosition(chapterIndex: 0, paragraphIndex: 1, globalWordIndex: 5)
+
+        bookStore.saveReadingPosition(
+            book: pdf,
+            position: oldPosition,
+            pageIndex: 1,
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        bookStore.savePDFPage(book: pdf, pageIndex: 4, updatedAt: Date(timeIntervalSince1970: 110))
+
+        let pdfProgress = cloudStore.progress(for: pdf)
+        XCTAssertEqual(pdfProgress?.pageIndex, 4)
+        XCTAssertNil(pdfProgress?.readingPosition)
+
+        bookStore.saveReadingPosition(
+            book: epub,
+            position: oldPosition,
+            locatorJSONString: #"{"href":"chapter-1.xhtml"}"#,
+            displayPage: 4,
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        bookStore.saveEPUBLocator(
+            book: epub,
+            locatorJSONString: #"{"href":"chapter-2.xhtml"}"#,
+            displayPage: 9,
+            updatedAt: Date(timeIntervalSince1970: 110)
+        )
+
+        let epubProgress = cloudStore.progress(for: epub)
+        XCTAssertEqual(epubProgress?.locatorJSONString, #"{"href":"chapter-2.xhtml"}"#)
+        XCTAssertEqual(epubProgress?.displayPage, 9)
+        XCTAssertNil(epubProgress?.readingPosition)
+    }
+
     func testSavingEPUBLocatorAndPositionWritesCloudProgress() {
         let book = makeBook(title: "EPUB", fileName: "epub.epub")
         let fakeStore = FakeCloudKeyValueStore()

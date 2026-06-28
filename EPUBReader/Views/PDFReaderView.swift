@@ -451,6 +451,11 @@ struct PDFReaderView: View {
         }
 
         if let pageIndex = progress.pageIndex {
+            if progress.readingPosition == nil,
+               let position = playbackPosition(forPage: pageIndex) {
+                bookStore.saveReadingPosition(bookId: book.id, position: position)
+                restorePlaybackPosition(position)
+            }
             proxy.goToPage(pageIndex)
             return
         }
@@ -460,6 +465,20 @@ struct PDFReaderView: View {
            let location = parsedPDF.wordLocations[safe: position.globalWordIndex] {
             proxy.scrollTo(pageIndex: location.pageIndex, range: location.range)
         }
+    }
+
+    private func playbackPosition(forPage pageIndex: Int) -> ReadingPosition? {
+        guard let parsedPDF,
+              let wordIndex = parsedPDF.wordLocations.firstIndex(where: { $0.pageIndex == pageIndex }),
+              let paragraphIndex = parsedPDF.book.flatParagraphs.indexOfParagraph(containingWordId: wordIndex) else {
+            return nil
+        }
+        let paragraph = parsedPDF.book.flatParagraphs[paragraphIndex]
+        return ReadingPosition(
+            chapterIndex: paragraph.chapterIndex,
+            paragraphIndex: paragraphIndex,
+            globalWordIndex: wordIndex
+        )
     }
 
     private func restorePlaybackPosition(_ position: ReadingPosition) {
