@@ -506,6 +506,7 @@ class BookStore: ObservableObject {
         if let remote {
             if local == nil {
                 saveLocalCloudProgress(progress.withUpdatedAt(remote.updatedAt.addingTimeInterval(-0.001)), bookId: book.id)
+                objectWillChange.send()
                 return
             }
             if remote.isNewer(than: local), !allowReplacingNewerRemote {
@@ -519,6 +520,7 @@ class BookStore: ObservableObject {
 
         saveLocalCloudProgress(progress, bookId: book.id)
         cloudProgressStore.save(progress, for: book)
+        objectWillChange.send()
     }
 
     private func progressLocationChanged(_ progress: CloudReadingProgress, from local: CloudReadingProgress?) -> Bool {

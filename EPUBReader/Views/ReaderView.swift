@@ -29,6 +29,7 @@ struct ReaderView: View {
     @State private var currentVisibleAutoAdvanceTarget: EPUBVisibleAutoAdvanceTarget?
     @State private var lastAutoAdvanceTarget: EPUBAutoAdvanceTarget?
     @State private var suppressNextLocatorCloudOverwrite = true
+    @State private var hasExplicitProgressIntent = false
 
     private var theme: ReaderTheme { bookStore.readerTheme }
 
@@ -287,7 +288,7 @@ struct ReaderView: View {
 
                 if let latestCloudProgress {
                     Button {
-                        jumpToCloudProgress(latestCloudProgress)
+                        jumpToLatestCloudProgress()
                     } label: {
                         Label(latestCloudProgress.pageLabel, systemImage: "icloud.and.arrow.down")
                             .font(.subheadline.weight(.medium))
@@ -394,6 +395,7 @@ struct ReaderView: View {
 
             let delegate = ReaderNavigatorDelegate(
                 onTap: { [self] in
+                    hasExplicitProgressIntent = true
                     hasTextSelection = nav.currentSelection != nil
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showControls.toggle()
@@ -407,7 +409,7 @@ struct ReaderView: View {
                         currentVisibleAutoAdvanceTarget = visibleAutoAdvanceTarget(from: locator)
                     }
                     if let jsonString = locator.jsonString {
-                        let allowReplacingNewerRemote = !suppressNextLocatorCloudOverwrite
+                        let allowReplacingNewerRemote = hasExplicitProgressIntent && !suppressNextLocatorCloudOverwrite
                         suppressNextLocatorCloudOverwrite = false
                         bookStore.saveEPUBLocator(
                             book: book,
@@ -539,6 +541,7 @@ struct ReaderView: View {
 
         if let nav = navigator,
            let selection = nav.currentSelection {
+            hasExplicitProgressIntent = true
             guard let startPos = findStartFromSelection(selection) else {
                 showPlaybackError(selectionStartErrorMessage)
                 return
@@ -551,6 +554,7 @@ struct ReaderView: View {
             return
         }
 
+        hasExplicitProgressIntent = true
         reconfigurePlayback()
 
         // Clamp: a persisted index can go stale if extraction logic changes across app updates.
@@ -573,6 +577,7 @@ struct ReaderView: View {
             return
         }
 
+        hasExplicitProgressIntent = true
         reconfigurePlayback()
         playbackManager.play(fromParagraphIndex: startPos.paragraphIndex, wordIndex: startPos.wordIndex)
         navigator?.clearSelection()
@@ -603,6 +608,7 @@ struct ReaderView: View {
               let firstParagraph = chapter.paragraphs.first,
               let hrefURL = AnyURL(string: firstParagraph.resourceHref) else { return }
 
+        hasExplicitProgressIntent = true
         let locator = Locator(
             href: hrefURL,
             mediaType: .xhtml
@@ -679,7 +685,14 @@ struct ReaderView: View {
     }
 
     private func jumpToCurrentPosition() {
+        hasExplicitProgressIntent = true
         jumpToPosition(paragraphId: playbackManager.currentParagraphId, wordIndex: playbackManager.currentGlobalWordIndex)
+    }
+
+    private func jumpToLatestCloudProgress() {
+        hasExplicitProgressIntent = true
+        guard let progress = bookStore.newerCloudProgress(for: book) else { return }
+        jumpToCloudProgress(progress)
     }
 
     private func jumpToCloudProgress(_ progress: CloudReadingProgress) {

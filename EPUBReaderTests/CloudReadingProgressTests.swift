@@ -142,6 +142,23 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.format, .pdf)
     }
 
+    func testSavingCloudProgressPublishesBookStoreChange() async {
+        let book = makeBook(title: "Published PDF", fileName: "published.pdf")
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: CloudReadingProgressStore(store: FakeCloudKeyValueStore(), notificationObject: nil),
+            notificationCenter: NotificationCenter()
+        )
+        let changed = expectation(description: "book store publishes local cloud progress changes")
+        bookStore.objectWillChange
+            .sink { changed.fulfill() }
+            .store(in: &cancellables)
+
+        bookStore.savePDFPage(book: book, pageIndex: 2, updatedAt: Date(timeIntervalSince1970: 100))
+
+        await fulfillment(of: [changed], timeout: 1)
+    }
+
     func testPassiveLocalSaveDoesNotOverwriteNewerRemoteProgress() {
         let book = makeBook(title: "Conflict", fileName: "conflict.pdf")
         let fakeStore = FakeCloudKeyValueStore()

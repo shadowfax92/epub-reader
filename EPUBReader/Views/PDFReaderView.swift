@@ -220,7 +220,7 @@ struct PDFReaderView: View {
 
                 if let latestCloudProgress {
                     Button {
-                        jumpToCloudProgress(latestCloudProgress)
+                        jumpToLatestCloudProgress()
                     } label: {
                         Label(latestCloudProgress.pageLabel, systemImage: "icloud.and.arrow.down")
                             .font(.subheadline.weight(.medium))
@@ -440,6 +440,11 @@ struct PDFReaderView: View {
         guard let parsedPDF,
               let location = parsedPDF.wordLocations[safe: playbackManager.currentGlobalWordIndex] else { return }
         proxy.scrollTo(pageIndex: location.pageIndex, range: location.range)
+    }
+
+    private func jumpToLatestCloudProgress() {
+        guard let progress = bookStore.newerCloudProgress(for: book) else { return }
+        jumpToCloudProgress(progress)
     }
 
     private func jumpToCloudProgress(_ progress: CloudReadingProgress) {
