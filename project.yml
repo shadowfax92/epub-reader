@@ -32,7 +32,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.personal.EPUBReader
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
-        DEVELOPMENT_TEAM: "8YMKWU47S5"
+        DEVELOPMENT_TEAM: ""
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: EPUBReader/EPUBReader.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

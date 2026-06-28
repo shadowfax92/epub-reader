@@ -273,10 +273,6 @@ class BookStore: ObservableObject {
         }
     }
 
-    func clearReadingPosition(bookId: UUID) {
-        defaults.removeObject(forKey: "position_\(bookId.uuidString)")
-    }
-
     func saveReadingPosition(
         book: BookMetadata,
         position: ReadingPosition,
@@ -334,8 +330,6 @@ class BookStore: ObservableObject {
         }
         if let position = progress.readingPosition {
             saveReadingPosition(bookId: book.id, position: position)
-        } else {
-            clearReadingPosition(bookId: book.id)
         }
         if let locatorJSONString = progress.locatorJSONString {
             defaults.set(locatorJSONString, forKey: "locator_\(book.id.uuidString)")
@@ -375,15 +369,24 @@ class BookStore: ObservableObject {
         )
     }
 
-    /// Writes local progress to iCloud unless another device has advanced past this device's baseline.
+    /// Writes local progress to iCloud without letting passive stale callbacks overwrite newer remote progress.
     private func saveCloudProgress(_ progress: CloudReadingProgress, for book: BookMetadata) {
         let local = localCloudProgress(bookId: book.id)
         if let remote = cloudProgressStore.progress(for: book),
-           remote.isNewer(than: local) {
+           remote.isNewer(than: local),
+           !progressLocationChanged(progress, from: local) {
             return
         }
         saveLocalCloudProgress(progress, bookId: book.id)
         cloudProgressStore.save(progress, for: book)
+    }
+
+    private func progressLocationChanged(_ progress: CloudReadingProgress, from local: CloudReadingProgress?) -> Bool {
+        guard let local else { return false }
+        return progress.pageIndex != local.pageIndex
+            || progress.displayPage != local.displayPage
+            || progress.locatorJSONString != local.locatorJSONString
+            || progress.readingPosition != local.readingPosition
     }
 
     private func localCloudProgress(bookId: UUID) -> CloudReadingProgress? {

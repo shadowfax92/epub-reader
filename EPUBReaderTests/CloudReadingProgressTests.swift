@@ -101,8 +101,31 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.format, .pdf)
     }
 
-    func testLocalSaveDoesNotOverwriteNewerRemoteProgress() {
+    func testPassiveLocalSaveDoesNotOverwriteNewerRemoteProgress() {
         let book = makeBook(title: "Conflict", fileName: "conflict.pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+
+        bookStore.savePDFPage(book: book, pageIndex: 1, updatedAt: Date(timeIntervalSince1970: 100))
+        cloudStore.save(
+            CloudReadingProgress(book: book, pageIndex: 6, updatedAt: Date(timeIntervalSince1970: 200)),
+            for: book
+        )
+
+        bookStore.savePDFPage(book: book, pageIndex: 1, updatedAt: Date(timeIntervalSince1970: 300))
+
+        XCTAssertEqual(bookStore.getPDFPage(bookId: book.id), 1)
+        XCTAssertEqual(cloudStore.progress(for: book)?.pageIndex, 6)
+        XCTAssertEqual(bookStore.newerCloudProgress(for: book)?.pageIndex, 6)
+    }
+
+    func testLocalMovementAfterRemoteProgressCanBecomeNewCloudProgress() {
+        let book = makeBook(title: "Keep Reading", fileName: "keep-reading.pdf")
         let fakeStore = FakeCloudKeyValueStore()
         let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
         let bookStore = BookStore(
@@ -119,9 +142,8 @@ final class CloudReadingProgressTests: XCTestCase {
 
         bookStore.savePDFPage(book: book, pageIndex: 2, updatedAt: Date(timeIntervalSince1970: 300))
 
-        XCTAssertEqual(bookStore.getPDFPage(bookId: book.id), 2)
-        XCTAssertEqual(cloudStore.progress(for: book)?.pageIndex, 6)
-        XCTAssertEqual(bookStore.newerCloudProgress(for: book)?.pageIndex, 6)
+        XCTAssertEqual(cloudStore.progress(for: book)?.pageIndex, 2)
+        XCTAssertNil(bookStore.newerCloudProgress(for: book))
     }
 
     func testPageAndLocatorOnlyUpdatesDoNotCarryStalePlaybackPosition() {
