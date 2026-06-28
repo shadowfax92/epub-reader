@@ -53,7 +53,7 @@ struct PDFReaderView: View {
                     document: pdfDocument,
                     proxy: proxy,
                     highlight: currentHighlight,
-                    autoAdvancePagesWithSpeech: bookStore.autoAdvancePagesWithSpeech,
+                    autoAdvancePagesWithSpeech: bookStore.autoAdvancePagesWithSpeechInPDF,
                     backgroundColor: UIColor(theme.backgroundColor),
                     initialPageIndex: initialPageIndex,
                     onTap: { toggleControls() },
