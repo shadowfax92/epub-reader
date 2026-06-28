@@ -15,6 +15,7 @@ final class BookStoreImportTests: XCTestCase {
 
     override func tearDown() {
         UserDefaults.standard.removeObject(forKey: "autoAdvancePagesWithSpeech")
+        UserDefaults.standard.removeObject(forKey: "autoAdvancePagesWithSpeechInPDF")
         super.tearDown()
     }
 
@@ -34,6 +35,35 @@ final class BookStoreImportTests: XCTestCase {
         let reloaded = BookStore()
 
         XCTAssertFalse(reloaded.autoAdvancePagesWithSpeech)
+    }
+
+    func testAutoAdvancePagesWithSpeechInPDFDefaultsOn() {
+        UserDefaults.standard.removeObject(forKey: "autoAdvancePagesWithSpeech")
+        UserDefaults.standard.removeObject(forKey: "autoAdvancePagesWithSpeechInPDF")
+        let store = BookStore()
+
+        XCTAssertTrue(store.autoAdvancePagesWithSpeechInPDF)
+    }
+
+    func testAutoAdvancePagesWithSpeechInPDFInheritsLegacyValueWhenUnset() {
+        UserDefaults.standard.removeObject(forKey: "autoAdvancePagesWithSpeechInPDF")
+        let store = BookStore()
+        store.autoAdvancePagesWithSpeech = false // pre-split combined value
+
+        // No PDF key yet → inherit the legacy value rather than re-enabling.
+        XCTAssertFalse(store.autoAdvancePagesWithSpeechInPDF)
+    }
+
+    func testAutoAdvancePagesWithSpeechInPDFPersistsFalseIndependently() {
+        let store = BookStore()
+        store.autoAdvancePagesWithSpeech = true
+        store.autoAdvancePagesWithSpeechInPDF = false
+
+        let reloaded = BookStore()
+
+        XCTAssertFalse(reloaded.autoAdvancePagesWithSpeechInPDF)
+        // The EPUB toggle is independent and unaffected.
+        XCTAssertTrue(reloaded.autoAdvancePagesWithSpeech)
     }
 
     // MARK: - EPUB

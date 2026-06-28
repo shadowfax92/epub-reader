@@ -34,7 +34,8 @@ struct ReadingSettingsView: View {
             }
 
             Section("Narration") {
-                Toggle("Auto-Advance Pages", isOn: autoAdvancePagesBinding)
+                Toggle("Auto-Advance Pages (EPUB)", isOn: autoAdvancePagesEPUBBinding)
+                Toggle("Auto-Advance Pages (PDF)", isOn: autoAdvancePagesPDFBinding)
             }
         }
         .navigationTitle("Reading")
@@ -51,10 +52,17 @@ struct ReadingSettingsView: View {
         Binding(get: { bookStore.fontSize }, set: { bookStore.fontSize = $0 })
     }
 
-    private var autoAdvancePagesBinding: Binding<Bool> {
+    private var autoAdvancePagesEPUBBinding: Binding<Bool> {
         Binding(
             get: { bookStore.autoAdvancePagesWithSpeech },
             set: { bookStore.autoAdvancePagesWithSpeech = $0 }
+        )
+    }
+
+    private var autoAdvancePagesPDFBinding: Binding<Bool> {
+        Binding(
+            get: { bookStore.autoAdvancePagesWithSpeechInPDF },
+            set: { bookStore.autoAdvancePagesWithSpeechInPDF = $0 }
         )
     }
 }

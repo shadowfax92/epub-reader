@@ -143,3 +143,33 @@ extension EPUBVisibleAutoAdvanceTarget {
         return nil
     }
 }
+
+/// Serializes speech-driven EPUB page turns: only one turn is in flight at a time, and
+/// no further turn is issued until Readium's viewport confirms the new page is on screen.
+///
+/// Readium drops a `.jump` issued while another is still `.jumping`, and its visible range
+/// only refreshes (via `viewportDidChange`) after a jump settles to `.idle`. The previous
+/// cancel-and-reissue-every-word approach therefore raced that settle window and pages
+/// intermittently failed to follow narration. This gate closes the window.
+struct SpeechPageFollowCoordinator {
+    private(set) var isAwaitingViewport = false
+
+    /// Arms the gate and reports whether a page turn should be issued now. Returns `true`
+    /// only for an advance verdict when no prior turn is still awaiting confirmation.
+    mutating func shouldIssueTurn(wantsAdvance: Bool) -> Bool {
+        guard wantsAdvance, !isAwaitingViewport else { return false }
+        isAwaitingViewport = true
+        return true
+    }
+
+    /// The navigator reported a viewport change — the new page is on screen, so the next
+    /// turn may be considered.
+    mutating func viewportDidSettle() { isAwaitingViewport = false }
+
+    /// The jump was rejected or a no-op (`go` returned `false`), so no viewport change is
+    /// coming; release the gate immediately.
+    mutating func turnDidNotMove() { isAwaitingViewport = false }
+
+    /// Playback started or stopped — no follow should straddle the transition.
+    mutating func reset() { isAwaitingViewport = false }
+}

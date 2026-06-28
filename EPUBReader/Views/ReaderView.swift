@@ -40,6 +40,8 @@ struct ReaderView: View {
     @State private var wordRangesByResourceHref: [String: EPUBResourceWordRange] = [:]
     @State private var currentVisibleAutoAdvanceTarget: EPUBVisibleAutoAdvanceTarget?
     @State private var lastAutoAdvanceTarget: EPUBAutoAdvanceTarget?
+    @State private var speechFollowCoordinator = SpeechPageFollowCoordinator()
+    @State private var speechFollowGeneration = 0
     @State private var suppressNextLocatorCloudOverwrite = true
     @State private var suppressedLocatorSignature: EPUBLocatorSignature?
 
@@ -90,6 +92,7 @@ struct ReaderView: View {
             playbackManager.clearCallbacks()
         }
         .onChange(of: playbackManager.isPlaying) { _, playing in
+            speechFollowCoordinator.reset() // no page-follow should straddle a play/pause
             if playing {
                 scheduleHideControls()
                 updateWordHighlight() // resume keeps the word index unchanged, so onChange alone won't fire
@@ -431,6 +434,7 @@ struct ReaderView: View {
                 },
                 onViewportChanged: { [self] viewport in
                     currentVisibleAutoAdvanceTarget = visibleAutoAdvanceTarget(from: viewport)
+                    speechFollowCoordinator.viewportDidSettle() // new page is on screen; allow the next turn
                 },
                 onSelectionChanged: { [self] _ in
                     hasTextSelection = nav.currentSelection != nil
@@ -669,10 +673,33 @@ struct ReaderView: View {
 
         nav.apply(decorations: [decoration], in: "tts")
 
-        guard shouldAutoAdvancePagesWithSpeech(to: paragraph, wordIndex: wordIndex) else { return }
-        navigationTask?.cancel()
+        // A turn is still settling: keep the highlight moving, but don't evaluate another
+        // advance yet. Running the decider here would also poison `lastAutoAdvanceTarget`
+        // with targets we never navigated to, masking the next real off-page jump.
+        guard !speechFollowCoordinator.isAwaitingViewport else { return }
+
+        let wantsAdvance = shouldAutoAdvancePagesWithSpeech(to: paragraph, wordIndex: wordIndex)
+        guard speechFollowCoordinator.shouldIssueTurn(wantsAdvance: wantsAdvance) else { return }
+
+        // One turn at a time, no cancel-and-replace: Readium drops a jump issued while
+        // another is in flight, which is exactly what made page-following miss turns. The
+        // gate is normally released by the navigator's next viewport change; the cases
+        // where that won't fire are released below so following can never wedge.
+        speechFollowGeneration &+= 1
+        let generation = speechFollowGeneration
         navigationTask = Task {
-            _ = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            let moved = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
+            guard generation == speechFollowGeneration else { return } // superseded by a newer turn
+            guard moved else {
+                speechFollowCoordinator.turnDidNotMove() // rejected/no-op: no viewport change is coming
+                return
+            }
+            // A jump to a word already rendered on the current page shifts nothing, so
+            // Readium emits no viewportDidChange. Release the gate if it stays silent,
+            // otherwise the gate — and page-following — would wedge for the session.
+            try? await Task.sleep(for: .milliseconds(800))
+            guard generation == speechFollowGeneration else { return }
+            speechFollowCoordinator.viewportDidSettle()
         }
     }
 
