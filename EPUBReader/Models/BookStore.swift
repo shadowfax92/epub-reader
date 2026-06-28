@@ -122,6 +122,7 @@ class BookStore: ObservableObject {
         cloudProgressStore.synchronize()
         observeCloudProgressChanges()
         loadBooks()
+        scheduleContentFingerprintBackfill()
     }
 
     deinit {
@@ -379,9 +380,9 @@ class BookStore: ObservableObject {
     }
 
     func newerCloudProgress(for book: BookMetadata) -> CloudReadingProgress? {
-        let currentBook = currentBookMetadata(for: book)
+        let currentBook = currentBookMetadata(for: book, backfillFingerprint: false)
         guard let remote = cloudProgressStore.progress(for: currentBook),
-              remote.isNewer(than: localCloudProgressSnapshot(for: currentBook, backfillLegacy: true)?.progress) else {
+              remote.isNewer(than: localCloudProgressSnapshot(for: currentBook, backfillLegacy: false)?.progress) else {
             return nil
         }
         return remote
@@ -448,8 +449,17 @@ class BookStore: ObservableObject {
         let remote = cloudProgressStore.progress(for: book)
         let snapshot = baseline
         let local = snapshot?.progress
+        let locationChanged = progressLocationChanged(progress, from: local)
+
+        if let remote,
+           remote.isNewer(than: local),
+           progress.readingPosition == nil,
+           remote.readingPosition != nil,
+           isSameCloudLocation(progress, remote) {
+            return
+        }
+
         let progressToSave = progressPreservingRemoteReadingPosition(progress, remote: remote, book: book)
-        let locationChanged = progressLocationChanged(progressToSave, from: local)
 
         if let remote {
             if local == nil {
@@ -573,9 +583,9 @@ class BookStore: ObservableObject {
         "cloudProgressLegacyBaseline_\(bookId.uuidString)"
     }
 
-    private func currentBookMetadata(for book: BookMetadata) -> BookMetadata {
+    private func currentBookMetadata(for book: BookMetadata, backfillFingerprint: Bool = true) -> BookMetadata {
         guard let index = books.firstIndex(where: { $0.id == book.id }) else { return book }
-        if let updated = bookWithBackfilledFingerprint(books[index]) {
+        if backfillFingerprint, let updated = bookWithBackfilledFingerprint(books[index]) {
             books[index] = updated
             saveBooks()
             return updated
@@ -589,6 +599,36 @@ class BookStore: ObservableObject {
         var updated = book
         updated.contentFingerprint = fingerprint
         return updated
+    }
+
+    private func scheduleContentFingerprintBackfill() {
+        let candidates = books
+            .filter { $0.contentFingerprint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true }
+            .map { (id: $0.id, fileURL: $0.fileURL) }
+        guard !candidates.isEmpty else { return }
+
+        Task.detached(priority: .utility) { [weak self, candidates] in
+            let updates = candidates.compactMap { candidate -> (UUID, String)? in
+                guard let fingerprint = try? Self.contentFingerprint(for: candidate.fileURL) else { return nil }
+                return (candidate.id, fingerprint)
+            }
+            guard !updates.isEmpty else { return }
+            await self?.applyContentFingerprintBackfill(updates)
+        }
+    }
+
+    private func applyContentFingerprintBackfill(_ updates: [(UUID, String)]) {
+        var changed = false
+        for update in updates {
+            guard let index = books.firstIndex(where: { $0.id == update.0 }),
+                  books[index].contentFingerprint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true else { continue }
+            books[index].contentFingerprint = update.1
+            changed = true
+        }
+        if changed {
+            saveBooks()
+            objectWillChange.send()
+        }
     }
 
     // MARK: - Highlights

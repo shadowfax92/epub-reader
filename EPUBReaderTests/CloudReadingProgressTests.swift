@@ -146,6 +146,35 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertNil(bookStore.newerCloudProgress(for: book))
     }
 
+    func testNewerCloudProgressReadDoesNotBackfillLocalState() throws {
+        let defaults = makeDefaults()
+        let book = makeBook(title: "Read Only Progress", fileName: "read-only-\(UUID().uuidString).pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: defaults,
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+        try FileManager.default.createDirectory(
+            at: book.fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("read path should not hash this file".utf8).write(to: book.fileURL)
+        bookStore.books = [book]
+        defer { try? FileManager.default.removeItem(at: book.fileURL) }
+
+        bookStore.savePDFPage(bookId: book.id, pageIndex: 1)
+        cloudStore.save(
+            CloudReadingProgress(book: book, pageIndex: 4, updatedAt: Date(timeIntervalSince1970: 200)),
+            for: book
+        )
+
+        XCTAssertEqual(bookStore.newerCloudProgress(for: book)?.pageIndex, 4)
+        XCTAssertNil(bookStore.books.first?.contentFingerprint)
+        XCTAssertNil(defaults.data(forKey: "cloudProgress_\(book.id.uuidString)"))
+    }
+
     func testSavingPDFPageWritesLocalAndCloudProgress() {
         let book = makeBook(title: "PDF", fileName: "pdf.pdf")
         let fakeStore = FakeCloudKeyValueStore()
@@ -223,6 +252,35 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(bookStore.getPDFPage(bookId: book.id), 1)
         XCTAssertEqual(cloudStore.progress(for: book)?.pageIndex, 6)
         XCTAssertEqual(bookStore.newerCloudProgress(for: book)?.pageIndex, 6)
+    }
+
+    func testPassiveSameLocationSaveDoesNotHideNewerRemoteReadingPosition() {
+        let book = makeBook(title: "Remote Precision", fileName: "remote-precision.pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+        let remotePosition = ReadingPosition(chapterIndex: 0, paragraphIndex: 3, globalWordIndex: 20)
+        let remote = CloudReadingProgress(
+            book: book,
+            pageIndex: 6,
+            readingPosition: remotePosition,
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        bookStore.savePDFPage(book: book, pageIndex: 1, updatedAt: Date(timeIntervalSince1970: 100))
+        cloudStore.save(remote, for: book)
+
+        bookStore.savePDFPage(book: book, pageIndex: 6, updatedAt: Date(timeIntervalSince1970: 300))
+
+        let progress = cloudStore.progress(for: book)
+        XCTAssertEqual(progress?.updatedAt, remote.updatedAt)
+        XCTAssertEqual(progress?.readingPosition, remotePosition)
+        XCTAssertEqual(bookStore.newerCloudProgress(for: book)?.readingPosition, remotePosition)
+        XCTAssertNil(bookStore.getReadingPosition(bookId: book.id))
     }
 
     func testLocalMovementAfterRemoteProgressCanBecomeNewCloudProgress() {
