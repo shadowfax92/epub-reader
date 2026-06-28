@@ -122,10 +122,19 @@ struct PDFKitReaderView: UIViewRepresentable {
         var onVisiblePageChanged: (Int) -> Void
         var pendingInitialPageIndex: Int?
 
+        private struct PendingSpeechFollow {
+            let pageIndex: Int
+            let bounds: CGRect
+            var attempts: Int
+        }
+
         private var initialNavigationAttempts = 0
         private var currentAnnotations: [PDFAnnotation] = []
         private var lastHighlight: PDFWordHighlight?
         private var lastAutoAdvancePagesWithSpeech: Bool?
+        private var pendingSpeechFollow: PendingSpeechFollow?
+        private var speechFollowRetryScheduled = false
+        private let maxSpeechFollowAttempts = 5
         private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
 
         init(onTap: @escaping () -> Void,
@@ -181,6 +190,11 @@ struct PDFKitReaderView: UIViewRepresentable {
                         }
                         return
                     }
+                    if self.retryPendingSpeechFollow(in: pdfView) {
+                        if self.pendingSpeechFollow != nil {
+                            return
+                        }
+                    }
                     self.onVisiblePageChanged(pageIndex)
                 }
             })
@@ -217,7 +231,12 @@ struct PDFKitReaderView: UIViewRepresentable {
             in pdfView: PDFView
         ) {
             guard highlight != lastHighlight ||
-                    autoAdvancePagesWithSpeech != lastAutoAdvancePagesWithSpeech else { return }
+                    autoAdvancePagesWithSpeech != lastAutoAdvancePagesWithSpeech else {
+                if autoAdvancePagesWithSpeech {
+                    retryPendingSpeechFollow(in: pdfView)
+                }
+                return
+            }
             lastHighlight = highlight
             lastAutoAdvancePagesWithSpeech = autoAdvancePagesWithSpeech
 
@@ -229,7 +248,10 @@ struct PDFKitReaderView: UIViewRepresentable {
             guard let highlight,
                   let document = pdfView.document,
                   let page = document.page(at: highlight.pageIndex),
-                  let selection = page.selection(for: highlight.range) else { return }
+                  let selection = page.selection(for: highlight.range) else {
+                pendingSpeechFollow = nil
+                return
+            }
 
             // Line fragments avoid union boxes that cover gaps for wrapped or hyphen-merged words.
             for lineSelection in selection.selectionsByLine() {
@@ -241,10 +263,69 @@ struct PDFKitReaderView: UIViewRepresentable {
                 currentAnnotations.append(annotation)
             }
 
-            guard autoAdvancePagesWithSpeech, pdfView.currentPage != page else { return }
+            guard autoAdvancePagesWithSpeech else {
+                pendingSpeechFollow = nil
+                return
+            }
+            guard pdfView.currentPage != page else {
+                pendingSpeechFollow = nil
+                return
+            }
             let bounds = selection.bounds(for: page)
-            if !bounds.isNull {
-                pdfView.go(to: bounds.insetBy(dx: -20, dy: -60), on: page)
+            guard !bounds.isNull, !bounds.isEmpty else {
+                pendingSpeechFollow = nil
+                return
+            }
+            followSpeech(toPageAt: highlight.pageIndex, bounds: bounds.insetBy(dx: -20, dy: -60), in: pdfView)
+        }
+
+        /// Retries a remembered speech-follow target after PDFKit swallows a page jump.
+        @discardableResult
+        func retryPendingSpeechFollow(in pdfView: PDFView) -> Bool {
+            attemptPendingSpeechFollow(in: pdfView, scheduleFollowUp: false)
+        }
+
+        private func followSpeech(toPageAt pageIndex: Int, bounds: CGRect, in pdfView: PDFView) {
+            pendingSpeechFollow = PendingSpeechFollow(pageIndex: pageIndex, bounds: bounds, attempts: 0)
+            attemptPendingSpeechFollow(in: pdfView, scheduleFollowUp: true)
+        }
+
+        @discardableResult
+        private func attemptPendingSpeechFollow(in pdfView: PDFView, scheduleFollowUp: Bool) -> Bool {
+            guard var pending = pendingSpeechFollow else { return false }
+            guard let document = pdfView.document,
+                  let page = document.page(at: pending.pageIndex) else {
+                pendingSpeechFollow = nil
+                return false
+            }
+            if pdfView.currentPage == page {
+                pendingSpeechFollow = nil
+                return true
+            }
+            guard pending.attempts < maxSpeechFollowAttempts else {
+                pendingSpeechFollow = nil
+                return false
+            }
+
+            pending.attempts += 1
+            pendingSpeechFollow = pending
+            pdfView.go(to: pending.bounds, on: page)
+
+            if scheduleFollowUp {
+                schedulePendingSpeechFollowRetry(in: pdfView)
+            }
+            return true
+        }
+
+        private func schedulePendingSpeechFollowRetry(in pdfView: PDFView) {
+            guard !speechFollowRetryScheduled else { return }
+            speechFollowRetryScheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak pdfView] in
+                Task { @MainActor in
+                    guard let self, let pdfView else { return }
+                    self.speechFollowRetryScheduled = false
+                    self.attemptPendingSpeechFollow(in: pdfView, scheduleFollowUp: true)
+                }
             }
         }
     }

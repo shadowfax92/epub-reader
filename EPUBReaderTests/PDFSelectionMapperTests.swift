@@ -207,4 +207,65 @@ final class PDFSelectionMapperTests: XCTestCase {
         coordinator.applyHighlight(highlight, autoAdvancePagesWithSpeech: true, in: pdfView)
         XCTAssertEqual(document.index(for: try XCTUnwrap(pdfView.currentPage)), 1)
     }
+
+    @MainActor
+    func testPDFHighlightRetryRecoversWhenFirstSpeechNavigationDoesNotStick() throws {
+        let url = try PDFTestFixtures.makePDF(pages: ["first page text", "target word on second page"])
+        let document = try XCTUnwrap(PDFDocument(url: url))
+        let firstPage = try XCTUnwrap(document.page(at: 0))
+        let secondPage = try XCTUnwrap(document.page(at: 1))
+        let pageString = try XCTUnwrap(secondPage.string)
+        let range = (pageString as NSString).range(of: "target")
+        XCTAssertNotEqual(range.location, NSNotFound)
+
+        let pdfView = PDFView(frame: CGRect(x: 0, y: 0, width: 612, height: 792))
+        pdfView.displayMode = .singlePage
+        pdfView.document = document
+        pdfView.go(to: firstPage)
+        pdfView.layoutDocumentView()
+
+        let coordinator = PDFKitReaderView.Coordinator(
+            onTap: {},
+            onSelectionChanged: { _ in },
+            onVisiblePageChanged: { _ in }
+        )
+        let highlight = PDFWordHighlight(pageIndex: 1, range: range)
+
+        coordinator.applyHighlight(highlight, autoAdvancePagesWithSpeech: true, in: pdfView)
+        pdfView.go(to: firstPage)
+
+        coordinator.retryPendingSpeechFollow(in: pdfView)
+        XCTAssertEqual(document.index(for: try XCTUnwrap(pdfView.currentPage)), 1)
+    }
+
+    @MainActor
+    func testDisablingPDFAutoAdvanceClearsPendingSpeechNavigation() throws {
+        let url = try PDFTestFixtures.makePDF(pages: ["first page text", "target word on second page"])
+        let document = try XCTUnwrap(PDFDocument(url: url))
+        let firstPage = try XCTUnwrap(document.page(at: 0))
+        let secondPage = try XCTUnwrap(document.page(at: 1))
+        let pageString = try XCTUnwrap(secondPage.string)
+        let range = (pageString as NSString).range(of: "target")
+        XCTAssertNotEqual(range.location, NSNotFound)
+
+        let pdfView = PDFView(frame: CGRect(x: 0, y: 0, width: 612, height: 792))
+        pdfView.displayMode = .singlePage
+        pdfView.document = document
+        pdfView.go(to: firstPage)
+        pdfView.layoutDocumentView()
+
+        let coordinator = PDFKitReaderView.Coordinator(
+            onTap: {},
+            onSelectionChanged: { _ in },
+            onVisiblePageChanged: { _ in }
+        )
+        let highlight = PDFWordHighlight(pageIndex: 1, range: range)
+
+        coordinator.applyHighlight(highlight, autoAdvancePagesWithSpeech: true, in: pdfView)
+        pdfView.go(to: firstPage)
+        coordinator.applyHighlight(highlight, autoAdvancePagesWithSpeech: false, in: pdfView)
+
+        coordinator.retryPendingSpeechFollow(in: pdfView)
+        XCTAssertEqual(document.index(for: try XCTUnwrap(pdfView.currentPage)), 0)
+    }
 }
