@@ -42,6 +42,19 @@ struct CloudReadingProgress: Codable, Equatable {
         return updatedAt > other.updatedAt
     }
 
+    func withUpdatedAt(_ updatedAt: Date) -> CloudReadingProgress {
+        CloudReadingProgress(
+            bookKey: bookKey,
+            bookTitle: bookTitle,
+            format: format,
+            pageIndex: pageIndex,
+            displayPage: displayPage,
+            locatorJSONString: locatorJSONString,
+            readingPosition: readingPosition,
+            updatedAt: updatedAt
+        )
+    }
+
     /// Derives a short iCloud key from stable book metadata so imports with different UUIDs can match.
     static func storageKey(for book: BookMetadata) -> String {
         "rp.v2.\(digest(for: bookKey(for: book)))"
@@ -78,5 +91,25 @@ struct CloudReadingProgress: Codable, Equatable {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !value.isEmpty else { return nil }
         return value
+    }
+
+    private init(
+        bookKey: String,
+        bookTitle: String,
+        format: BookFormat,
+        pageIndex: Int?,
+        displayPage: Int?,
+        locatorJSONString: String?,
+        readingPosition: ReadingPosition?,
+        updatedAt: Date
+    ) {
+        self.bookKey = bookKey
+        self.bookTitle = bookTitle
+        self.format = format
+        self.pageIndex = pageIndex
+        self.displayPage = displayPage
+        self.locatorJSONString = locatorJSONString
+        self.readingPosition = readingPosition
+        self.updatedAt = updatedAt
     }
 }

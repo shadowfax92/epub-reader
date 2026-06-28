@@ -156,6 +156,52 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertNil(bookStore.newerCloudProgress(for: book))
     }
 
+    func testInitialPassiveSaveDoesNotHideExistingRemoteProgress() {
+        let book = makeBook(title: "Initial Remote", fileName: "initial.pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+
+        cloudStore.save(
+            CloudReadingProgress(book: book, pageIndex: 9, updatedAt: Date(timeIntervalSince1970: 200)),
+            for: book
+        )
+
+        bookStore.savePDFPage(book: book, pageIndex: 0, updatedAt: Date(timeIntervalSince1970: 1_000))
+
+        XCTAssertEqual(cloudStore.progress(for: book)?.pageIndex, 9)
+        XCTAssertEqual(bookStore.newerCloudProgress(for: book)?.pageIndex, 9)
+
+        bookStore.savePDFPage(book: book, pageIndex: 1, updatedAt: Date(timeIntervalSince1970: 1_100))
+        XCTAssertEqual(cloudStore.progress(for: book)?.pageIndex, 1)
+    }
+
+    func testStaleRemoteProgressIsRepairedByNewerLocalProgress() {
+        let book = makeBook(title: "Stale Remote", fileName: "stale.pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+
+        bookStore.savePDFPage(book: book, pageIndex: 3, updatedAt: Date(timeIntervalSince1970: 300))
+        cloudStore.save(
+            CloudReadingProgress(book: book, pageIndex: 9, updatedAt: Date(timeIntervalSince1970: 200)),
+            for: book
+        )
+
+        bookStore.savePDFPage(book: book, pageIndex: 3, updatedAt: Date(timeIntervalSince1970: 400))
+
+        XCTAssertEqual(cloudStore.progress(for: book)?.pageIndex, 3)
+        XCTAssertNil(bookStore.newerCloudProgress(for: book))
+    }
+
     func testLegacyPDFProgressIsLocalBaselineBeforeRemoteJump() {
         let defaults = makeDefaults()
         let book = makeBook(title: "Legacy PDF", fileName: "legacy.pdf")
