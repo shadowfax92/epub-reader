@@ -1,3 +1,4 @@
+import CryptoKit
 import SwiftUI
 import PDFKit
 import ReadiumShared
@@ -6,7 +7,10 @@ import ReadiumShared
 class BookStore: ObservableObject {
     @Published var books: [BookMetadata] = []
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    private let cloudProgressStore: CloudReadingProgressStore
+    private let notificationCenter: NotificationCenter
+    nonisolated(unsafe) private var cloudProgressObserver: NSObjectProtocol?
 
     var ttsProvider: TTSProviderType {
         get { TTSProviderType(rawValue: defaults.string(forKey: "ttsProvider") ?? "") ?? .elevenLabs }
@@ -101,13 +105,30 @@ class BookStore: ObservableObject {
     private let booksDirectoryURL: URL
     private let metadataFileURL: URL
 
-    init() {
+    init(
+        defaults: UserDefaults = .standard,
+        cloudProgressStore: CloudReadingProgressStore = CloudReadingProgressStore(),
+        notificationCenter: NotificationCenter = .default
+    ) {
+        self.defaults = defaults
+        self.cloudProgressStore = cloudProgressStore
+        self.notificationCenter = notificationCenter
+
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         booksDirectoryURL = docs.appendingPathComponent("Books")
         metadataFileURL = docs.appendingPathComponent("books_metadata.json")
 
         try? FileManager.default.createDirectory(at: booksDirectoryURL, withIntermediateDirectories: true)
+        cloudProgressStore.synchronize()
+        observeCloudProgressChanges()
         loadBooks()
+        scheduleContentFingerprintBackfill()
+    }
+
+    deinit {
+        if let cloudProgressObserver {
+            notificationCenter.removeObserver(cloudProgressObserver)
+        }
     }
 
     func importBook(from sourceURL: URL) async throws -> BookMetadata {
@@ -155,6 +176,7 @@ class BookStore: ObservableObject {
             author = parsed.author
         }
 
+        let contentFingerprint = try? Self.contentFingerprint(for: stagedURL)
         let destURL = booksDirectoryURL.appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: destURL.path) {
             _ = try FileManager.default.replaceItemAt(destURL, withItemAt: stagedURL)
@@ -167,7 +189,8 @@ class BookStore: ObservableObject {
             title: title ?? BookMetadata.fallbackTitle(forFileName: fileName),
             author: author ?? "Unknown Author",
             fileName: fileName,
-            dateAdded: Date()
+            dateAdded: Date(),
+            contentFingerprint: contentFingerprint
         )
 
         books.insert(book, at: 0)
@@ -218,18 +241,74 @@ class BookStore: ObservableObject {
         }
     }
 
+    /// Creates a stable identifier for the imported bytes so cloud progress does not rely only on metadata.
+    nonisolated static func contentFingerprint(for url: URL) throws -> String {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        var hasher = SHA256()
+        if isDirectory.boolValue {
+            let files = try regularFiles(in: url)
+            for file in files {
+                hasher.update(data: Data(file.relativePath.utf8))
+                hasher.update(data: Data([0]))
+                hasher.update(data: try Data(contentsOf: file.url, options: .mappedIfSafe))
+                hasher.update(data: Data([0]))
+            }
+        } else {
+            hasher.update(data: try Data(contentsOf: url, options: .mappedIfSafe))
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private nonisolated static func regularFiles(in directory: URL) throws -> [(relativePath: String, url: URL)] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var files: [(relativePath: String, url: URL)] = []
+        for case let url as URL in enumerator {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            let relativePath = String(url.path.dropFirst(directory.path.count + 1))
+            files.append((relativePath, url))
+        }
+        return files.sorted { $0.relativePath < $1.relativePath }
+    }
+
     func removeBook(_ book: BookMetadata) {
+        let currentBook = currentBookMetadata(for: book)
         books.removeAll { $0.id == book.id }
-        try? FileManager.default.removeItem(at: book.fileURL)
-        defaults.removeObject(forKey: "position_\(book.id.uuidString)")
-        defaults.removeObject(forKey: "highlights_\(book.id.uuidString)")
-        defaults.removeObject(forKey: "pdfPage_\(book.id.uuidString)")
-        defaults.removeObject(forKey: "locator_\(book.id.uuidString)")
+        try? FileManager.default.removeItem(at: currentBook.fileURL)
+        defaults.removeObject(forKey: "position_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: "highlights_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: "pdfPage_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: "locator_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: "cloudProgress_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: legacyCloudProgressBaselineKey(bookId: currentBook.id))
         saveBooks()
     }
 
     func savePDFPage(bookId: UUID, pageIndex: Int) {
         defaults.set(pageIndex, forKey: "pdfPage_\(bookId.uuidString)")
+    }
+
+    func savePDFPage(book: BookMetadata, pageIndex: Int, updatedAt: Date = Date()) {
+        let currentBook = currentBookMetadata(for: book)
+        let baseline = localCloudProgressSnapshot(for: currentBook, backfillLegacy: true)
+        savePDFPage(bookId: currentBook.id, pageIndex: pageIndex)
+        let progress = mergedCloudProgress(
+            for: currentBook,
+            existing: baseline?.progress,
+            pageIndex: pageIndex,
+            displayPage: pageIndex + 1,
+            updatedAt: updatedAt
+        )
+        saveCloudProgress(progress, for: currentBook, baseline: baseline)
     }
 
     func getPDFPage(bookId: UUID) -> Int? {
@@ -242,9 +321,301 @@ class BookStore: ObservableObject {
         }
     }
 
+    func saveReadingPosition(
+        book: BookMetadata,
+        position: ReadingPosition,
+        locatorJSONString: String? = nil,
+        pageIndex: Int? = nil,
+        displayPage: Int? = nil,
+        updatedAt: Date = Date()
+    ) {
+        let currentBook = currentBookMetadata(for: book)
+        let baseline = localCloudProgressSnapshot(for: currentBook, backfillLegacy: true)
+        saveReadingPosition(bookId: currentBook.id, position: position)
+        guard pageIndex != nil || locatorJSONString != nil else { return }
+        let progress = mergedCloudProgress(
+            for: currentBook,
+            existing: baseline?.progress,
+            pageIndex: pageIndex,
+            displayPage: displayPage ?? pageIndex.map { $0 + 1 },
+            locatorJSONString: locatorJSONString,
+            readingPosition: position,
+            updatedAt: updatedAt
+        )
+        saveCloudProgress(progress, for: currentBook, baseline: baseline)
+    }
+
     func getReadingPosition(bookId: UUID) -> ReadingPosition? {
         guard let data = defaults.data(forKey: "position_\(bookId.uuidString)") else { return nil }
         return try? JSONDecoder().decode(ReadingPosition.self, from: data)
+    }
+
+    func saveEPUBLocator(
+        book: BookMetadata,
+        locatorJSONString: String,
+        displayPage: Int?,
+        updatedAt: Date = Date(),
+        allowReplacingNewerRemote: Bool = true
+    ) {
+        let currentBook = currentBookMetadata(for: book)
+        let baseline = localCloudProgressSnapshot(for: currentBook, backfillLegacy: true)
+        defaults.set(locatorJSONString, forKey: "locator_\(currentBook.id.uuidString)")
+        let progress = mergedCloudProgress(
+            for: currentBook,
+            existing: baseline?.progress,
+            displayPage: displayPage,
+            locatorJSONString: locatorJSONString,
+            updatedAt: updatedAt
+        )
+        saveCloudProgress(
+            progress,
+            for: currentBook,
+            baseline: baseline,
+            allowReplacingNewerRemote: allowReplacingNewerRemote
+        )
+    }
+
+    func getEPUBLocatorJSONString(bookId: UUID) -> String? {
+        defaults.string(forKey: "locator_\(bookId.uuidString)")
+    }
+
+    func newerCloudProgress(for book: BookMetadata) -> CloudReadingProgress? {
+        let currentBook = currentBookMetadata(for: book)
+        guard let remote = cloudProgressStore.progress(for: currentBook),
+              remote.isNewer(than: localCloudProgressSnapshot(for: currentBook, backfillLegacy: false)?.progress) else {
+            return nil
+        }
+        return remote
+    }
+
+    func applyCloudProgressLocally(_ progress: CloudReadingProgress, for book: BookMetadata) {
+        let currentBook = currentBookMetadata(for: book)
+        guard CloudReadingProgress.matches(progress, book: currentBook),
+              progress.format == currentBook.format else { return }
+
+        let local = localProgressForApply(progress, bookId: currentBook.id)
+        if let pageIndex = local.pageIndex {
+            savePDFPage(bookId: currentBook.id, pageIndex: pageIndex)
+        }
+        if let position = local.readingPosition {
+            saveReadingPosition(bookId: currentBook.id, position: position)
+        }
+        if let locatorJSONString = local.locatorJSONString {
+            defaults.set(locatorJSONString, forKey: "locator_\(currentBook.id.uuidString)")
+        }
+        saveLocalCloudProgress(local, bookId: currentBook.id)
+        objectWillChange.send()
+    }
+
+    private func observeCloudProgressChanges() {
+        cloudProgressObserver = notificationCenter.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: cloudProgressStore.notificationObject,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.objectWillChange.send()
+            }
+        }
+    }
+
+    private func mergedCloudProgress(
+        for book: BookMetadata,
+        existing: CloudReadingProgress? = nil,
+        pageIndex: Int? = nil,
+        displayPage: Int? = nil,
+        locatorJSONString: String? = nil,
+        readingPosition: ReadingPosition? = nil,
+        updatedAt: Date
+    ) -> CloudReadingProgress {
+        let existing = existing ?? localCloudProgressSnapshot(for: book, backfillLegacy: false)?.progress
+        return CloudReadingProgress(
+            book: book,
+            pageIndex: pageIndex ?? existing?.pageIndex,
+            displayPage: displayPage ?? existing?.displayPage,
+            locatorJSONString: locatorJSONString ?? existing?.locatorJSONString,
+            readingPosition: readingPosition,
+            updatedAt: updatedAt
+        )
+    }
+
+    /// Writes local progress to iCloud without letting passive stale callbacks overwrite newer remote progress.
+    private func saveCloudProgress(
+        _ progress: CloudReadingProgress,
+        for book: BookMetadata,
+        baseline: LocalCloudProgressSnapshot?,
+        allowReplacingNewerRemote: Bool = true
+    ) {
+        let remote = cloudProgressStore.progress(for: book)
+        let snapshot = baseline
+        let local = snapshot?.progress
+        let locationChanged = progressLocationChanged(progress, from: local)
+
+        if let remote,
+           remote.isNewer(than: local),
+           progress.readingPosition == nil,
+           remote.readingPosition != nil,
+           isSameCloudLocation(progress, remote) {
+            return
+        }
+
+        let progressToSave = progressPreservingRemoteReadingPosition(progress, remote: remote, book: book)
+
+        if let remote {
+            if local == nil {
+                saveLocalCloudProgress(progressToSave.withUpdatedAt(remote.updatedAt.addingTimeInterval(-0.001)), bookId: book.id)
+                objectWillChange.send()
+                return
+            }
+            if remote.isNewer(than: local), !allowReplacingNewerRemote {
+                return
+            }
+            if !locationChanged,
+               snapshot?.source == .legacy || remote.isNewer(than: local) {
+                return
+            }
+        }
+
+        saveLocalCloudProgress(progressToSave, bookId: book.id)
+        cloudProgressStore.save(progressToSave, for: book)
+        objectWillChange.send()
+    }
+
+    private func localProgressForApply(_ progress: CloudReadingProgress, bookId: UUID) -> CloudReadingProgress {
+        guard let local = localCloudProgress(bookId: bookId),
+              local.isNewer(than: progress),
+              isSameCloudLocation(local, progress) else { return progress }
+
+        if local.readingPosition == nil, let readingPosition = progress.readingPosition {
+            return local.withReadingPosition(readingPosition)
+        }
+        return local
+    }
+
+    private func progressPreservingRemoteReadingPosition(
+        _ progress: CloudReadingProgress,
+        remote: CloudReadingProgress?,
+        book: BookMetadata
+    ) -> CloudReadingProgress {
+        guard let remote,
+              progress.readingPosition == nil,
+              let readingPosition = remote.readingPosition,
+              isSameCloudLocation(progress, remote) else { return progress }
+
+        return CloudReadingProgress(
+            book: book,
+            pageIndex: progress.pageIndex,
+            displayPage: progress.displayPage,
+            locatorJSONString: progress.locatorJSONString,
+            readingPosition: readingPosition,
+            updatedAt: progress.updatedAt
+        )
+    }
+
+    private func isSameCloudLocation(_ lhs: CloudReadingProgress, _ rhs: CloudReadingProgress) -> Bool {
+        lhs.format == rhs.format
+            && lhs.pageIndex == rhs.pageIndex
+            && lhs.displayPage == rhs.displayPage
+            && lhs.locatorJSONString == rhs.locatorJSONString
+    }
+
+    private func progressLocationChanged(_ progress: CloudReadingProgress, from local: CloudReadingProgress?) -> Bool {
+        guard let local else { return false }
+        let readingPositionChanged = progress.readingPosition.map { $0 != local.readingPosition } ?? false
+        return progress.pageIndex != local.pageIndex
+            || progress.displayPage != local.displayPage
+            || progress.locatorJSONString != local.locatorJSONString
+            || readingPositionChanged
+    }
+
+    private func localCloudProgress(bookId: UUID) -> CloudReadingProgress? {
+        guard let data = defaults.data(forKey: "cloudProgress_\(bookId.uuidString)") else { return nil }
+        return try? JSONDecoder().decode(CloudReadingProgress.self, from: data)
+    }
+
+    private enum LocalCloudProgressSource {
+        case stored
+        case legacy
+    }
+
+    private struct LocalCloudProgressSnapshot {
+        let progress: CloudReadingProgress
+        let source: LocalCloudProgressSource
+    }
+
+    private func localCloudProgressSnapshot(for book: BookMetadata, backfillLegacy: Bool) -> LocalCloudProgressSnapshot? {
+        if let progress = localCloudProgress(bookId: book.id) {
+            let source: LocalCloudProgressSource = defaults.bool(forKey: legacyCloudProgressBaselineKey(bookId: book.id)) ? .legacy : .stored
+            return LocalCloudProgressSnapshot(progress: progress, source: source)
+        }
+        guard let progress = legacyCloudProgress(for: book) else { return nil }
+        if backfillLegacy {
+            saveLocalCloudProgress(progress, bookId: book.id, legacyBaseline: true)
+        }
+        return LocalCloudProgressSnapshot(progress: progress, source: .legacy)
+    }
+
+    private func legacyCloudProgress(for book: BookMetadata) -> CloudReadingProgress? {
+        let pageIndex = getPDFPage(bookId: book.id)
+        let locatorJSONString = getEPUBLocatorJSONString(bookId: book.id)
+        let readingPosition = getReadingPosition(bookId: book.id)
+        guard pageIndex != nil || locatorJSONString != nil || readingPosition != nil else { return nil }
+        return CloudReadingProgress(
+            book: book,
+            pageIndex: pageIndex,
+            locatorJSONString: locatorJSONString,
+            readingPosition: readingPosition,
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+    }
+
+    private func saveLocalCloudProgress(_ progress: CloudReadingProgress, bookId: UUID, legacyBaseline: Bool = false) {
+        guard let data = try? JSONEncoder().encode(progress) else { return }
+        defaults.set(data, forKey: "cloudProgress_\(bookId.uuidString)")
+        if legacyBaseline {
+            defaults.set(true, forKey: legacyCloudProgressBaselineKey(bookId: bookId))
+        } else {
+            defaults.removeObject(forKey: legacyCloudProgressBaselineKey(bookId: bookId))
+        }
+    }
+
+    private func legacyCloudProgressBaselineKey(bookId: UUID) -> String {
+        "cloudProgressLegacyBaseline_\(bookId.uuidString)"
+    }
+
+    private func currentBookMetadata(for book: BookMetadata) -> BookMetadata {
+        guard let index = books.firstIndex(where: { $0.id == book.id }) else { return book }
+        return books[index]
+    }
+
+    private func scheduleContentFingerprintBackfill() {
+        let candidates = books
+            .filter { $0.contentFingerprint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true }
+            .map { (id: $0.id, fileURL: $0.fileURL) }
+        guard !candidates.isEmpty else { return }
+
+        Task.detached(priority: .utility) { [weak self, candidates] in
+            let updates = candidates.compactMap { candidate -> (UUID, String)? in
+                guard let fingerprint = try? Self.contentFingerprint(for: candidate.fileURL) else { return nil }
+                return (candidate.id, fingerprint)
+            }
+            guard !updates.isEmpty else { return }
+            await self?.applyContentFingerprintBackfill(updates)
+        }
+    }
+
+    private func applyContentFingerprintBackfill(_ updates: [(UUID, String)]) {
+        var changed = false
+        for update in updates {
+            guard let index = books.firstIndex(where: { $0.id == update.0 }),
+                  books[index].contentFingerprint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true else { continue }
+            books[index].contentFingerprint = update.1
+            changed = true
+        }
+        if changed {
+            saveBooks()
+            objectWillChange.send()
+        }
     }
 
     // MARK: - Highlights
