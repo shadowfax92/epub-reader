@@ -709,6 +709,7 @@ struct ReaderView: View {
         if let locatorJSONString = progress.locatorJSONString,
            let locator = try? Locator(jsonString: locatorJSONString),
            let nav = navigator {
+            let derivedPosition = progress.readingPosition ?? playbackPosition(for: locator)
             navigationTask?.cancel()
             suppressNextLocatorCloudOverwrite = true
             suppressedLocatorSignature = nil
@@ -722,7 +723,10 @@ struct ReaderView: View {
                 }
                 await MainActor.run {
                     bookStore.applyCloudProgressLocally(progress, for: book)
-                    if let position = progress.readingPosition {
+                    if let position = progress.readingPosition ?? derivedPosition {
+                        if progress.readingPosition == nil {
+                            bookStore.saveReadingPosition(bookId: book.id, position: position)
+                        }
                         restorePlaybackPosition(position)
                     }
                 }
@@ -776,6 +780,48 @@ struct ReaderView: View {
     private func playbackLocator(for position: ReadingPosition) -> Locator? {
         guard let paragraph = parsedBook?.flatParagraphs[safe: position.paragraphIndex] else { return nil }
         return locator(for: paragraph, wordIndex: position.globalWordIndex)
+    }
+
+    private func playbackPosition(for locator: Locator) -> ReadingPosition? {
+        guard let parsedBook else { return nil }
+        let href = locator.href.string
+
+        if let highlight = locator.text.highlight,
+           let start = TTSHighlightHelper.findStartPosition(
+                selectedText: highlight,
+                hrefString: href,
+                paragraphs: parsedBook.flatParagraphs
+           ) {
+            let paragraph = parsedBook.flatParagraphs[start.paragraphIndex]
+            return ReadingPosition(
+                chapterIndex: paragraph.chapterIndex,
+                paragraphIndex: start.paragraphIndex,
+                globalWordIndex: start.wordIndex
+            )
+        }
+
+        if let progression = locator.locations.progression,
+           let range = wordRangesByResourceHref.first(where: { TTSHighlightHelper.hrefsMatch($0.key, href) })?.value {
+            let offset = Int((progression * Double(max(0, range.wordCount - 1))).rounded())
+            let wordIndex = min(range.lastWordId, max(range.firstWordId, range.firstWordId + offset))
+            if let paragraphIndex = parsedBook.flatParagraphs.indexOfParagraph(containingWordId: wordIndex) {
+                let paragraph = parsedBook.flatParagraphs[paragraphIndex]
+                return ReadingPosition(
+                    chapterIndex: paragraph.chapterIndex,
+                    paragraphIndex: paragraphIndex,
+                    globalWordIndex: wordIndex
+                )
+            }
+        }
+
+        guard let match = parsedBook.flatParagraphs.enumerated().first(where: {
+            TTSHighlightHelper.hrefsMatch($0.element.resourceHref, href)
+        }) else { return nil }
+        return ReadingPosition(
+            chapterIndex: match.element.chapterIndex,
+            paragraphIndex: match.offset,
+            globalWordIndex: match.element.words.first?.id ?? 0
+        )
     }
 
     private func locator(for paragraph: BookParagraph, wordIndex: Int) -> Locator? {

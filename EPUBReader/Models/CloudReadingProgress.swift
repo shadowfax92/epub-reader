@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-struct CloudReadingProgress: Codable, Equatable {
+struct CloudReadingProgress: Codable, Equatable, Sendable {
     let bookKey: String
     let bookTitle: String
     let format: BookFormat
@@ -86,17 +86,47 @@ struct CloudReadingProgress: Codable, Equatable {
         storageKey(forBookKey: bookKey(for: book))
     }
 
+    static func storageKeys(for book: BookMetadata) -> [String] {
+        uniqueBookKeys(for: book).map(storageKey(forBookKey:))
+    }
+
     static func storageKey(forBookKey bookKey: String) -> String {
         "rp.v2.\(digest(for: bookKey))"
     }
 
     static func bookKey(for book: BookMetadata) -> String {
+        if let fingerprint = normalizedFingerprint(book.contentFingerprint) {
+            return "\(book.format.rawValue):content:\(fingerprint)"
+        }
+        return metadataBookKey(for: book)
+    }
+
+    static func matches(_ progress: CloudReadingProgress, book: BookMetadata) -> Bool {
+        uniqueBookKeys(for: book).contains(progress.bookKey)
+    }
+
+    private static func uniqueBookKeys(for book: BookMetadata) -> [String] {
+        var result: [String] = []
+        for key in [bookKey(for: book), metadataBookKey(for: book)] where !result.contains(key) {
+            result.append(key)
+        }
+        return result
+    }
+
+    private static func metadataBookKey(for book: BookMetadata) -> String {
         let title = normalized(book.title.isEmpty ? BookMetadata.fallbackTitle(forFileName: book.fileName) : book.title)
         let author = normalized(book.author)
+        let fileName = normalized(BookMetadata.fallbackTitle(forFileName: book.fileName))
         guard !author.isEmpty, author != normalized("Unknown Author") else {
-            return "\(book.format.rawValue):title:\(title)"
+            return "\(book.format.rawValue):title:\(title):file:\(fileName)"
         }
-        return "\(book.format.rawValue):title:\(title):author:\(author)"
+        return "\(book.format.rawValue):title:\(title):author:\(author):file:\(fileName)"
+    }
+
+    private static func normalizedFingerprint(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !value.isEmpty else { return nil }
+        return value
     }
 
     private static func normalized(_ value: String) -> String {

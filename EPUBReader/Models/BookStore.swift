@@ -1,3 +1,4 @@
+import CryptoKit
 import SwiftUI
 import PDFKit
 import ReadiumShared
@@ -174,6 +175,7 @@ class BookStore: ObservableObject {
             author = parsed.author
         }
 
+        let contentFingerprint = try? Self.contentFingerprint(for: stagedURL)
         let destURL = booksDirectoryURL.appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: destURL.path) {
             _ = try FileManager.default.replaceItemAt(destURL, withItemAt: stagedURL)
@@ -186,7 +188,8 @@ class BookStore: ObservableObject {
             title: title ?? BookMetadata.fallbackTitle(forFileName: fileName),
             author: author ?? "Unknown Author",
             fileName: fileName,
-            dateAdded: Date()
+            dateAdded: Date(),
+            contentFingerprint: contentFingerprint
         )
 
         books.insert(book, at: 0)
@@ -235,6 +238,45 @@ class BookStore: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Creates a stable identifier for the imported bytes so cloud progress does not rely only on metadata.
+    nonisolated static func contentFingerprint(for url: URL) throws -> String {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        var hasher = SHA256()
+        if isDirectory.boolValue {
+            let files = try regularFiles(in: url)
+            for file in files {
+                hasher.update(data: Data(file.relativePath.utf8))
+                hasher.update(data: Data([0]))
+                hasher.update(data: try Data(contentsOf: file.url, options: .mappedIfSafe))
+                hasher.update(data: Data([0]))
+            }
+        } else {
+            hasher.update(data: try Data(contentsOf: url, options: .mappedIfSafe))
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private nonisolated static func regularFiles(in directory: URL) throws -> [(relativePath: String, url: URL)] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var files: [(relativePath: String, url: URL)] = []
+        for case let url as URL in enumerator {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            let relativePath = String(url.path.dropFirst(directory.path.count + 1))
+            files.append((relativePath, url))
+        }
+        return files.sorted { $0.relativePath < $1.relativePath }
     }
 
     func removeBook(_ book: BookMetadata) {
@@ -347,7 +389,7 @@ class BookStore: ObservableObject {
 
     func applyCloudProgressLocally(_ progress: CloudReadingProgress, for book: BookMetadata) {
         let currentBook = currentBookMetadata(for: book)
-        guard progress.bookKey == CloudReadingProgress.bookKey(for: currentBook),
+        guard CloudReadingProgress.matches(progress, book: currentBook),
               progress.format == currentBook.format else { return }
 
         let local = localProgressForApply(progress, bookId: currentBook.id)
