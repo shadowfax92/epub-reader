@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-enum BookFormat: String {
+enum BookFormat: String, Codable, Sendable {
     case epub, pdf
 
     init(fileName: String) {
@@ -9,12 +9,13 @@ enum BookFormat: String {
     }
 }
 
-struct BookMetadata: Codable, Identifiable, Hashable {
+struct BookMetadata: Codable, Identifiable, Hashable, Sendable {
     let id: UUID
     var title: String
     var author: String
     let fileName: String
     var dateAdded: Date
+    var contentFingerprint: String? = nil
 
     var fileURL: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -28,7 +29,7 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     }
 }
 
-struct ReadingPosition: Codable {
+struct ReadingPosition: Codable, Equatable, Sendable {
     var chapterIndex: Int
     var paragraphIndex: Int
     var globalWordIndex: Int

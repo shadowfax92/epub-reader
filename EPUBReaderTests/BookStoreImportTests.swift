@@ -48,6 +48,7 @@ final class BookStoreImportTests: XCTestCase {
 
         XCTAssertEqual(book.title, "Test Book")
         XCTAssertEqual(book.author, "Test Author")
+        XCTAssertNotNil(book.contentFingerprint)
         XCTAssertTrue(store.books.contains(book))
 
         var isDirectory: ObjCBool = false
@@ -127,6 +128,17 @@ final class BookStoreImportTests: XCTestCase {
     }
 
     // MARK: - PDF
+
+    func testImportStoresContentFingerprint() async throws {
+        let url = try PDFTestFixtures.makePDF(pages: ["fingerprinted text"], title: "Fingerprint", author: "A")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = BookStore()
+
+        let book = try await store.importBook(from: url)
+        defer { store.removeBook(book) }
+
+        XCTAssertEqual(book.contentFingerprint, try BookStore.contentFingerprint(for: book.fileURL))
+    }
 
     func testImportRejectsPasswordProtectedPDFAndCleansUp() async throws {
         let url = try PDFTestFixtures.makePDF(pages: ["secret text"], password: "pw")
