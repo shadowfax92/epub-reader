@@ -173,6 +173,54 @@ final class EPUBAutoAdvanceDeciderTests: XCTestCase {
         XCTAssertEqual(target, autoAdvanceTarget(position: nil, progression: nil, fallbackParagraphId: 7))
     }
 
+    // MARK: - SpeechPageFollowCoordinator
+
+    func testCoordinatorIssuesTurnOnceThenSuppressesUntilSettled() {
+        var coordinator = SpeechPageFollowCoordinator()
+        XCTAssertFalse(coordinator.isAwaitingViewport)
+
+        XCTAssertTrue(coordinator.shouldIssueTurn(wantsAdvance: true))
+        XCTAssertTrue(coordinator.isAwaitingViewport)
+
+        // A second word still wanting to advance must not issue another turn mid-flight.
+        XCTAssertFalse(coordinator.shouldIssueTurn(wantsAdvance: true))
+        XCTAssertTrue(coordinator.isAwaitingViewport)
+    }
+
+    func testCoordinatorIgnoresNonAdvanceVerdict() {
+        var coordinator = SpeechPageFollowCoordinator()
+
+        XCTAssertFalse(coordinator.shouldIssueTurn(wantsAdvance: false))
+        XCTAssertFalse(coordinator.isAwaitingViewport)
+    }
+
+    func testCoordinatorViewportSettleReleasesGate() {
+        var coordinator = SpeechPageFollowCoordinator()
+        _ = coordinator.shouldIssueTurn(wantsAdvance: true)
+
+        coordinator.viewportDidSettle()
+        XCTAssertFalse(coordinator.isAwaitingViewport)
+        XCTAssertTrue(coordinator.shouldIssueTurn(wantsAdvance: true))
+    }
+
+    func testCoordinatorNoOpJumpReleasesGate() {
+        var coordinator = SpeechPageFollowCoordinator()
+        _ = coordinator.shouldIssueTurn(wantsAdvance: true)
+
+        coordinator.turnDidNotMove()
+        XCTAssertFalse(coordinator.isAwaitingViewport)
+        XCTAssertTrue(coordinator.shouldIssueTurn(wantsAdvance: true))
+    }
+
+    func testCoordinatorResetReleasesGate() {
+        var coordinator = SpeechPageFollowCoordinator()
+        _ = coordinator.shouldIssueTurn(wantsAdvance: true)
+
+        coordinator.reset()
+        XCTAssertFalse(coordinator.isAwaitingViewport)
+        XCTAssertTrue(coordinator.shouldIssueTurn(wantsAdvance: true))
+    }
+
     private func autoAdvanceTarget(
         resourceHref: String = "Text/ch1.xhtml",
         position: Int?,
