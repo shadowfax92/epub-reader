@@ -336,14 +336,16 @@ class BookStore: ObservableObject {
     }
 
     func removeBook(_ book: BookMetadata) {
+        let currentBook = currentBookMetadata(for: book)
         books.removeAll { $0.id == book.id }
-        try? FileManager.default.removeItem(at: book.fileURL)
-        defaults.removeObject(forKey: "position_\(book.id.uuidString)")
-        defaults.removeObject(forKey: "highlights_\(book.id.uuidString)")
-        defaults.removeObject(forKey: "pdfPage_\(book.id.uuidString)")
-        defaults.removeObject(forKey: "locator_\(book.id.uuidString)")
-        defaults.removeObject(forKey: "cloudProgress_\(book.id.uuidString)")
-        defaults.removeObject(forKey: legacyCloudProgressBaselineKey(bookId: book.id))
+        try? FileManager.default.removeItem(at: currentBook.fileURL)
+        defaults.removeObject(forKey: "position_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: "highlights_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: "pdfPage_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: "locator_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: "cloudProgress_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: legacyCloudProgressBaselineKey(bookId: currentBook.id))
+        cloudProgressStore.removeProgress(for: currentBook)
         saveBooks()
     }
 

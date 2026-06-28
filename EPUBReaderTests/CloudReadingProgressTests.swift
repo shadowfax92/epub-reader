@@ -142,6 +142,26 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.format, .pdf)
     }
 
+    func testRemovingBookClearsCloudProgress() {
+        let book = makeBook(title: "Deleted PDF", fileName: "deleted.pdf", contentFingerprint: "deleted")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+        bookStore.books = [book]
+
+        bookStore.savePDFPage(book: book, pageIndex: 2, updatedAt: Date(timeIntervalSince1970: 100))
+        XCTAssertNotNil(cloudStore.progress(for: book))
+
+        bookStore.removeBook(book)
+
+        XCTAssertNil(cloudStore.progress(for: book))
+        XCTAssertEqual(fakeStore.values, [:])
+    }
+
     func testSavingCloudProgressPublishesBookStoreChange() async {
         let book = makeBook(title: "Published PDF", fileName: "published.pdf")
         let bookStore = BookStore(
