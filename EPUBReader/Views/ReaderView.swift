@@ -688,7 +688,6 @@ struct ReaderView: View {
         if let locatorJSONString = progress.locatorJSONString,
            let locator = try? Locator(jsonString: locatorJSONString),
            let nav = navigator {
-            let derivedPosition = progress.readingPosition == nil ? playbackPosition(for: locator) : nil
             navigationTask?.cancel()
             suppressNextLocatorCloudOverwrite = true
             navigationTask = Task {
@@ -700,10 +699,7 @@ struct ReaderView: View {
                 }
                 await MainActor.run {
                     bookStore.applyCloudProgressLocally(progress, for: book)
-                    if let position = progress.readingPosition ?? derivedPosition {
-                        if progress.readingPosition == nil {
-                            bookStore.saveReadingPosition(bookId: book.id, position: position)
-                        }
+                    if let position = progress.readingPosition {
                         restorePlaybackPosition(position)
                     }
                 }
@@ -718,19 +714,6 @@ struct ReaderView: View {
             restorePlaybackPosition(position)
             jumpToPosition(paragraphId: paragraph.id, wordIndex: position.globalWordIndex)
         }
-    }
-
-    private func playbackPosition(for locator: Locator) -> ReadingPosition? {
-        guard let parsedBook else { return nil }
-        let href = locator.href.string
-        guard let match = parsedBook.flatParagraphs.enumerated().first(where: { _, paragraph in
-            TTSHighlightHelper.hrefsMatch(paragraph.resourceHref, href)
-        }) else { return nil }
-        return ReadingPosition(
-            chapterIndex: match.element.chapterIndex,
-            paragraphIndex: match.offset,
-            globalWordIndex: match.element.words.first?.id ?? 0
-        )
     }
 
     private func restorePlaybackPosition(_ position: ReadingPosition) {

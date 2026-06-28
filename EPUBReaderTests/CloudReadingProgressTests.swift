@@ -69,6 +69,25 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(cloudStore.progress(for: second)?.bookKey, CloudReadingProgress.bookKey(for: second))
     }
 
+    func testContentFingerprintFramesDirectoryEntries() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CloudReadingProgressTests.\(UUID().uuidString)")
+        let first = root.appendingPathComponent("first.epub")
+        let second = root.appendingPathComponent("second.epub")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        try Data([0x62, 0x63, 0x00, 0x64]).write(to: first.appendingPathComponent("a"))
+        try Data([0x62]).write(to: second.appendingPathComponent("a"))
+        try Data([0x64]).write(to: second.appendingPathComponent("c"))
+
+        XCTAssertNotEqual(
+            try BookStore.contentFingerprint(for: first),
+            try BookStore.contentFingerprint(for: second)
+        )
+    }
+
     func testCorruptCloudValueDecodesAsMissingProgress() {
         let book = makeBook(title: "Broken", fileName: "broken.epub")
         let fakeStore = FakeCloudKeyValueStore()

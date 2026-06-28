@@ -257,13 +257,18 @@ class BookStore: ObservableObject {
             let files = regularFiles(in: url)
                 .sorted { relativePath(for: $0, root: url) < relativePath(for: $1, root: url) }
 
+            appendString("directory-v1", to: &hasher)
+            appendLength(UInt64(files.count), to: &hasher)
             for fileURL in files {
                 let relativePath = relativePath(for: fileURL, root: url)
-                hasher.update(data: Data(relativePath.utf8))
-                hasher.update(data: Data([0]))
+                appendString("file", to: &hasher)
+                appendString(relativePath, to: &hasher)
+                appendLength(try fileSize(for: fileURL), to: &hasher)
                 try update(&hasher, withContentsOf: fileURL)
             }
         } else {
+            appendString("file-v1", to: &hasher)
+            appendLength(try fileSize(for: url), to: &hasher)
             try update(&hasher, withContentsOf: url)
         }
 
@@ -285,6 +290,26 @@ class BookStore: ObservableObject {
             if data.isEmpty { break }
             hasher.update(data: data)
         }
+    }
+
+    nonisolated private static func appendString(_ value: String, to hasher: inout SHA256) {
+        let data = Data(value.utf8)
+        appendLength(UInt64(data.count), to: &hasher)
+        hasher.update(data: data)
+    }
+
+    nonisolated private static func appendLength(_ value: UInt64, to hasher: inout SHA256) {
+        var bigEndian = value.bigEndian
+        let data = withUnsafeBytes(of: &bigEndian) { Data($0) }
+        hasher.update(data: data)
+    }
+
+    nonisolated private static func fileSize(for url: URL) throws -> UInt64 {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let size = attributes[.size] as? NSNumber else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return size.uint64Value
     }
 
     nonisolated private static func regularFiles(in root: URL) -> [URL] {
