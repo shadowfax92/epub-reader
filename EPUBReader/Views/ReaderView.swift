@@ -41,6 +41,7 @@ struct ReaderView: View {
     @State private var currentVisibleAutoAdvanceTarget: EPUBVisibleAutoAdvanceTarget?
     @State private var lastAutoAdvanceTarget: EPUBAutoAdvanceTarget?
     @State private var speechFollowCoordinator = SpeechPageFollowCoordinator()
+    @State private var speechFollowGeneration = 0
     @State private var suppressNextLocatorCloudOverwrite = true
     @State private var suppressedLocatorSignature: EPUBLocatorSignature?
 
@@ -682,12 +683,23 @@ struct ReaderView: View {
 
         // One turn at a time, no cancel-and-replace: Readium drops a jump issued while
         // another is in flight, which is exactly what made page-following miss turns. The
-        // gate is released on the navigator's next viewport change (or here if it no-ops).
+        // gate is normally released by the navigator's next viewport change; the cases
+        // where that won't fire are released below so following can never wedge.
+        speechFollowGeneration &+= 1
+        let generation = speechFollowGeneration
         navigationTask = Task {
             let moved = await nav.go(to: locator, options: NavigatorGoOptions(animated: true))
-            if !moved {
-                await MainActor.run { speechFollowCoordinator.turnDidNotMove() }
+            guard generation == speechFollowGeneration else { return } // superseded by a newer turn
+            guard moved else {
+                speechFollowCoordinator.turnDidNotMove() // rejected/no-op: no viewport change is coming
+                return
             }
+            // A jump to a word already rendered on the current page shifts nothing, so
+            // Readium emits no viewportDidChange. Release the gate if it stays silent,
+            // otherwise the gate — and page-following — would wedge for the session.
+            try? await Task.sleep(for: .milliseconds(800))
+            guard generation == speechFollowGeneration else { return }
+            speechFollowCoordinator.viewportDidSettle()
         }
     }
 

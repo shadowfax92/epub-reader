@@ -100,9 +100,12 @@ class BookStore: ObservableObject {
     }
 
     /// Speech-driven page following for PDFs, controlled independently of the EPUB toggle.
+    /// On first run after the split it inherits the pre-split combined value so a user who
+    /// had narration auto-advance turned off doesn't get it silently re-enabled for PDFs.
     var autoAdvancePagesWithSpeechInPDF: Bool {
         get {
-            defaults.object(forKey: "autoAdvancePagesWithSpeechInPDF") as? Bool ?? true
+            defaults.object(forKey: "autoAdvancePagesWithSpeechInPDF") as? Bool
+                ?? autoAdvancePagesWithSpeech
         }
         set { objectWillChange.send(); defaults.set(newValue, forKey: "autoAdvancePagesWithSpeechInPDF") }
     }
