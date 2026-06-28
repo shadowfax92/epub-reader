@@ -142,7 +142,7 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.format, .pdf)
     }
 
-    func testRemovingBookClearsCloudProgress() {
+    func testRemovingBookKeepsCloudProgressForReimport() {
         let book = makeBook(title: "Deleted PDF", fileName: "deleted.pdf", contentFingerprint: "deleted")
         let fakeStore = FakeCloudKeyValueStore()
         let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
@@ -158,8 +158,8 @@ final class CloudReadingProgressTests: XCTestCase {
 
         bookStore.removeBook(book)
 
-        XCTAssertNil(cloudStore.progress(for: book))
-        XCTAssertEqual(fakeStore.values, [:])
+        XCTAssertEqual(cloudStore.progress(for: book)?.pageIndex, 2)
+        XCTAssertEqual(bookStore.newerCloudProgress(for: book)?.pageIndex, 2)
     }
 
     func testSavingCloudProgressPublishesBookStoreChange() async {
@@ -502,6 +502,35 @@ final class CloudReadingProgressTests: XCTestCase {
         XCTAssertEqual(progress?.pageIndex, 5)
         XCTAssertEqual(progress?.displayPage, 6)
         XCTAssertEqual(progress?.readingPosition, stalePosition)
+    }
+
+    func testPDFPageCallbackDuringCloudJumpPreservesRemoteReadingPosition() {
+        let book = makeBook(title: "PDF Cloud Jump", fileName: "cloud-jump.pdf")
+        let fakeStore = FakeCloudKeyValueStore()
+        let cloudStore = CloudReadingProgressStore(store: fakeStore, notificationObject: fakeStore)
+        let bookStore = BookStore(
+            defaults: makeDefaults(),
+            cloudProgressStore: cloudStore,
+            notificationCenter: NotificationCenter()
+        )
+        let remotePosition = ReadingPosition(chapterIndex: 0, paragraphIndex: 3, globalWordIndex: 20)
+        let remote = CloudReadingProgress(
+            book: book,
+            pageIndex: 6,
+            readingPosition: remotePosition,
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        bookStore.savePDFPage(book: book, pageIndex: 1, updatedAt: Date(timeIntervalSince1970: 100))
+        cloudStore.save(remote, for: book)
+
+        bookStore.savePDFPage(book: book, pageIndex: 6, updatedAt: Date(timeIntervalSince1970: 300))
+        bookStore.applyCloudProgressLocally(remote, for: book)
+
+        let progress = cloudStore.progress(for: book)
+        XCTAssertEqual(progress?.pageIndex, 6)
+        XCTAssertEqual(progress?.readingPosition, remotePosition)
+        XCTAssertNil(bookStore.newerCloudProgress(for: book))
     }
 
     func testSavingEPUBLocatorAndPositionWritesCloudProgress() {

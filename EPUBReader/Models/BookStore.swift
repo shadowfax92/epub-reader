@@ -345,7 +345,6 @@ class BookStore: ObservableObject {
         defaults.removeObject(forKey: "locator_\(currentBook.id.uuidString)")
         defaults.removeObject(forKey: "cloudProgress_\(currentBook.id.uuidString)")
         defaults.removeObject(forKey: legacyCloudProgressBaselineKey(bookId: currentBook.id))
-        cloudProgressStore.removeProgress(for: currentBook)
         saveBooks()
     }
 
@@ -448,16 +447,17 @@ class BookStore: ObservableObject {
         guard progress.bookKey == CloudReadingProgress.bookKey(for: currentBook),
               progress.format == currentBook.format else { return }
 
-        if let pageIndex = progress.pageIndex {
+        let local = localProgressForApply(progress, bookId: currentBook.id)
+        if let pageIndex = local.pageIndex {
             savePDFPage(bookId: currentBook.id, pageIndex: pageIndex)
         }
-        if let position = progress.readingPosition {
+        if let position = local.readingPosition {
             saveReadingPosition(bookId: currentBook.id, position: position)
         }
-        if let locatorJSONString = progress.locatorJSONString {
+        if let locatorJSONString = local.locatorJSONString {
             defaults.set(locatorJSONString, forKey: "locator_\(currentBook.id.uuidString)")
         }
-        saveLocalCloudProgress(progress, bookId: currentBook.id)
+        saveLocalCloudProgress(local, bookId: currentBook.id)
         objectWillChange.send()
     }
 
@@ -503,11 +503,12 @@ class BookStore: ObservableObject {
         let remote = cloudProgressStore.progress(for: book)
         let snapshot = baseline
         let local = snapshot?.progress
-        let locationChanged = progressLocationChanged(progress, from: local)
+        let progressToSave = progressPreservingRemoteReadingPosition(progress, remote: remote, book: book)
+        let locationChanged = progressLocationChanged(progressToSave, from: local)
 
         if let remote {
             if local == nil {
-                saveLocalCloudProgress(progress.withUpdatedAt(remote.updatedAt.addingTimeInterval(-0.001)), bookId: book.id)
+                saveLocalCloudProgress(progressToSave.withUpdatedAt(remote.updatedAt.addingTimeInterval(-0.001)), bookId: book.id)
                 objectWillChange.send()
                 return
             }
@@ -520,9 +521,47 @@ class BookStore: ObservableObject {
             }
         }
 
-        saveLocalCloudProgress(progress, bookId: book.id)
-        cloudProgressStore.save(progress, for: book)
+        saveLocalCloudProgress(progressToSave, bookId: book.id)
+        cloudProgressStore.save(progressToSave, for: book)
         objectWillChange.send()
+    }
+
+    private func localProgressForApply(_ progress: CloudReadingProgress, bookId: UUID) -> CloudReadingProgress {
+        guard let local = localCloudProgress(bookId: bookId),
+              local.isNewer(than: progress),
+              isSameCloudLocation(local, progress) else { return progress }
+
+        if local.readingPosition == nil, let readingPosition = progress.readingPosition {
+            return local.withReadingPosition(readingPosition)
+        }
+        return local
+    }
+
+    private func progressPreservingRemoteReadingPosition(
+        _ progress: CloudReadingProgress,
+        remote: CloudReadingProgress?,
+        book: BookMetadata
+    ) -> CloudReadingProgress {
+        guard let remote,
+              progress.readingPosition == nil,
+              let readingPosition = remote.readingPosition,
+              isSameCloudLocation(progress, remote) else { return progress }
+
+        return CloudReadingProgress(
+            book: book,
+            pageIndex: progress.pageIndex,
+            displayPage: progress.displayPage,
+            locatorJSONString: progress.locatorJSONString,
+            readingPosition: readingPosition,
+            updatedAt: progress.updatedAt
+        )
+    }
+
+    private func isSameCloudLocation(_ lhs: CloudReadingProgress, _ rhs: CloudReadingProgress) -> Bool {
+        lhs.format == rhs.format
+            && lhs.pageIndex == rhs.pageIndex
+            && lhs.displayPage == rhs.displayPage
+            && lhs.locatorJSONString == rhs.locatorJSONString
     }
 
     private func progressLocationChanged(_ progress: CloudReadingProgress, from local: CloudReadingProgress?) -> Bool {

@@ -55,6 +55,19 @@ struct CloudReadingProgress: Codable, Equatable {
         )
     }
 
+    func withReadingPosition(_ readingPosition: ReadingPosition?) -> CloudReadingProgress {
+        CloudReadingProgress(
+            bookKey: bookKey,
+            bookTitle: bookTitle,
+            format: format,
+            pageIndex: pageIndex,
+            displayPage: displayPage,
+            locatorJSONString: locatorJSONString,
+            readingPosition: readingPosition,
+            updatedAt: updatedAt
+        )
+    }
+
     func migrated(to book: BookMetadata) -> CloudReadingProgress {
         CloudReadingProgress(
             bookKey: Self.bookKey(for: book),
