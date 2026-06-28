@@ -38,6 +38,10 @@ struct PDFReaderView: View {
         return min(100, max(0, current * 100 / total))
     }
 
+    private var latestCloudProgress: CloudReadingProgress? {
+        bookStore.newerCloudProgress(for: book)
+    }
+
     var body: some View {
         ZStack {
             theme.backgroundColor
@@ -54,7 +58,7 @@ struct PDFReaderView: View {
                     onTap: { toggleControls() },
                     onSelectionChanged: { hasTextSelection = $0 },
                     onVisiblePageChanged: { pageIndex in
-                        bookStore.savePDFPage(bookId: book.id, pageIndex: pageIndex)
+                        bookStore.savePDFPage(book: book, pageIndex: pageIndex)
                     }
                 )
                 .ignoresSafeArea()
@@ -188,30 +192,46 @@ struct PDFReaderView: View {
     }
 
     private var selectionActionsRow: some View {
-        HStack(spacing: 12) {
-            if hasTextSelection {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                if hasTextSelection {
+                    Button {
+                        playFromSelection()
+                    } label: {
+                        Label("Play from selection", systemImage: "text.line.first.and.arrowtriangle.forward")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color.accentColor))
+                            .foregroundStyle(.white)
+                    }
+                }
+
                 Button {
-                    playFromSelection()
+                    jumpToCurrentPosition()
                 } label: {
-                    Label("Play from selection", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    Label("Jump to position", systemImage: "scope")
                         .font(.subheadline.weight(.medium))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(Capsule().fill(Color.accentColor))
-                        .foregroundStyle(.white)
+                        .background(Capsule().fill(Color(.systemGray5)))
+                        .foregroundStyle(.primary)
+                }
+
+                if let latestCloudProgress {
+                    Button {
+                        jumpToCloudProgress(latestCloudProgress)
+                    } label: {
+                        Label(latestCloudProgress.pageLabel, systemImage: "icloud.and.arrow.down")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color(.systemGray5)))
+                            .foregroundStyle(.primary)
+                    }
                 }
             }
-
-            Button {
-                jumpToCurrentPosition()
-            } label: {
-                Label("Jump to position", systemImage: "scope")
-                    .font(.subheadline.weight(.medium))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Capsule().fill(Color(.systemGray5)))
-                    .foregroundStyle(.primary)
-            }
+            .padding(.horizontal, 20)
         }
     }
 
@@ -318,7 +338,11 @@ struct PDFReaderView: View {
             voiceId: bookStore.activeVoiceId,
             speed: currentSpeed,
             onPositionUpdate: { position in
-                bookStore.saveReadingPosition(bookId: book.id, position: position)
+                bookStore.saveReadingPosition(
+                    book: book,
+                    position: position,
+                    pageIndex: parsedPDF?.wordLocations[safe: position.globalWordIndex]?.pageIndex
+                )
             }
         )
     }
@@ -416,6 +440,37 @@ struct PDFReaderView: View {
         guard let parsedPDF,
               let location = parsedPDF.wordLocations[safe: playbackManager.currentGlobalWordIndex] else { return }
         proxy.scrollTo(pageIndex: location.pageIndex, range: location.range)
+    }
+
+    private func jumpToCloudProgress(_ progress: CloudReadingProgress) {
+        guard progress.format == .pdf else { return }
+        bookStore.applyCloudProgressLocally(progress, for: book)
+
+        if let position = progress.readingPosition {
+            restorePlaybackPosition(position)
+        }
+
+        if let pageIndex = progress.pageIndex {
+            proxy.goToPage(pageIndex)
+            return
+        }
+
+        if let position = progress.readingPosition,
+           let parsedPDF,
+           let location = parsedPDF.wordLocations[safe: position.globalWordIndex] {
+            proxy.scrollTo(pageIndex: location.pageIndex, range: location.range)
+        }
+    }
+
+    private func restorePlaybackPosition(_ position: ReadingPosition) {
+        guard let parsedPDF, !parsedPDF.book.flatParagraphs.isEmpty else { return }
+        let paragraphIndex = min(max(0, position.paragraphIndex), parsedPDF.book.flatParagraphs.count - 1)
+        playbackManager.restorePosition(
+            paragraphArrayIndex: paragraphIndex,
+            paragraphId: parsedPDF.book.flatParagraphs[paragraphIndex].id,
+            globalWordIndex: position.globalWordIndex
+        )
+        updateWordHighlight()
     }
 
     // MARK: - Helpers

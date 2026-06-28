@@ -6,7 +6,10 @@ import ReadiumShared
 class BookStore: ObservableObject {
     @Published var books: [BookMetadata] = []
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    private let cloudProgressStore: CloudReadingProgressStore
+    private let notificationCenter: NotificationCenter
+    nonisolated(unsafe) private var cloudProgressObserver: NSObjectProtocol?
 
     var ttsProvider: TTSProviderType {
         get { TTSProviderType(rawValue: defaults.string(forKey: "ttsProvider") ?? "") ?? .elevenLabs }
@@ -101,13 +104,29 @@ class BookStore: ObservableObject {
     private let booksDirectoryURL: URL
     private let metadataFileURL: URL
 
-    init() {
+    init(
+        defaults: UserDefaults = .standard,
+        cloudProgressStore: CloudReadingProgressStore = CloudReadingProgressStore(),
+        notificationCenter: NotificationCenter = .default
+    ) {
+        self.defaults = defaults
+        self.cloudProgressStore = cloudProgressStore
+        self.notificationCenter = notificationCenter
+
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         booksDirectoryURL = docs.appendingPathComponent("Books")
         metadataFileURL = docs.appendingPathComponent("books_metadata.json")
 
         try? FileManager.default.createDirectory(at: booksDirectoryURL, withIntermediateDirectories: true)
+        cloudProgressStore.synchronize()
+        observeCloudProgressChanges()
         loadBooks()
+    }
+
+    deinit {
+        if let cloudProgressObserver {
+            notificationCenter.removeObserver(cloudProgressObserver)
+        }
     }
 
     func importBook(from sourceURL: URL) async throws -> BookMetadata {
@@ -225,11 +244,23 @@ class BookStore: ObservableObject {
         defaults.removeObject(forKey: "highlights_\(book.id.uuidString)")
         defaults.removeObject(forKey: "pdfPage_\(book.id.uuidString)")
         defaults.removeObject(forKey: "locator_\(book.id.uuidString)")
+        defaults.removeObject(forKey: "cloudProgress_\(book.id.uuidString)")
         saveBooks()
     }
 
     func savePDFPage(bookId: UUID, pageIndex: Int) {
         defaults.set(pageIndex, forKey: "pdfPage_\(bookId.uuidString)")
+    }
+
+    func savePDFPage(book: BookMetadata, pageIndex: Int, updatedAt: Date = Date()) {
+        savePDFPage(bookId: book.id, pageIndex: pageIndex)
+        let progress = mergedCloudProgress(
+            for: book,
+            pageIndex: pageIndex,
+            displayPage: pageIndex + 1,
+            updatedAt: updatedAt
+        )
+        saveCloudProgress(progress, for: book)
     }
 
     func getPDFPage(bookId: UUID) -> Int? {
@@ -242,9 +273,115 @@ class BookStore: ObservableObject {
         }
     }
 
+    func saveReadingPosition(
+        book: BookMetadata,
+        position: ReadingPosition,
+        locatorJSONString: String? = nil,
+        pageIndex: Int? = nil,
+        displayPage: Int? = nil,
+        updatedAt: Date = Date()
+    ) {
+        saveReadingPosition(bookId: book.id, position: position)
+        let progress = mergedCloudProgress(
+            for: book,
+            pageIndex: pageIndex,
+            displayPage: displayPage ?? pageIndex.map { $0 + 1 },
+            locatorJSONString: locatorJSONString,
+            readingPosition: position,
+            updatedAt: updatedAt
+        )
+        saveCloudProgress(progress, for: book)
+    }
+
     func getReadingPosition(bookId: UUID) -> ReadingPosition? {
         guard let data = defaults.data(forKey: "position_\(bookId.uuidString)") else { return nil }
         return try? JSONDecoder().decode(ReadingPosition.self, from: data)
+    }
+
+    func saveEPUBLocator(book: BookMetadata, locatorJSONString: String, displayPage: Int?, updatedAt: Date = Date()) {
+        defaults.set(locatorJSONString, forKey: "locator_\(book.id.uuidString)")
+        let progress = mergedCloudProgress(
+            for: book,
+            displayPage: displayPage,
+            locatorJSONString: locatorJSONString,
+            updatedAt: updatedAt
+        )
+        saveCloudProgress(progress, for: book)
+    }
+
+    func getEPUBLocatorJSONString(bookId: UUID) -> String? {
+        defaults.string(forKey: "locator_\(bookId.uuidString)")
+    }
+
+    func newerCloudProgress(for book: BookMetadata) -> CloudReadingProgress? {
+        guard let remote = cloudProgressStore.progress(for: book),
+              remote.isNewer(than: localCloudProgress(bookId: book.id)) else {
+            return nil
+        }
+        return remote
+    }
+
+    func applyCloudProgressLocally(_ progress: CloudReadingProgress, for book: BookMetadata) {
+        guard progress.bookKey == CloudReadingProgress.bookKey(for: book),
+              progress.format == book.format else { return }
+
+        if let pageIndex = progress.pageIndex {
+            savePDFPage(bookId: book.id, pageIndex: pageIndex)
+        }
+        if let position = progress.readingPosition {
+            saveReadingPosition(bookId: book.id, position: position)
+        }
+        if let locatorJSONString = progress.locatorJSONString {
+            defaults.set(locatorJSONString, forKey: "locator_\(book.id.uuidString)")
+        }
+        saveLocalCloudProgress(progress, bookId: book.id)
+        objectWillChange.send()
+    }
+
+    private func observeCloudProgressChanges() {
+        cloudProgressObserver = notificationCenter.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: cloudProgressStore.notificationObject,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.objectWillChange.send()
+            }
+        }
+    }
+
+    private func mergedCloudProgress(
+        for book: BookMetadata,
+        pageIndex: Int? = nil,
+        displayPage: Int? = nil,
+        locatorJSONString: String? = nil,
+        readingPosition: ReadingPosition? = nil,
+        updatedAt: Date
+    ) -> CloudReadingProgress {
+        let existing = localCloudProgress(bookId: book.id)
+        return CloudReadingProgress(
+            book: book,
+            pageIndex: pageIndex ?? existing?.pageIndex,
+            displayPage: displayPage ?? existing?.displayPage,
+            locatorJSONString: locatorJSONString ?? existing?.locatorJSONString,
+            readingPosition: readingPosition ?? existing?.readingPosition,
+            updatedAt: updatedAt
+        )
+    }
+
+    private func saveCloudProgress(_ progress: CloudReadingProgress, for book: BookMetadata) {
+        saveLocalCloudProgress(progress, bookId: book.id)
+        cloudProgressStore.save(progress, for: book)
+    }
+
+    private func localCloudProgress(bookId: UUID) -> CloudReadingProgress? {
+        guard let data = defaults.data(forKey: "cloudProgress_\(bookId.uuidString)") else { return nil }
+        return try? JSONDecoder().decode(CloudReadingProgress.self, from: data)
+    }
+
+    private func saveLocalCloudProgress(_ progress: CloudReadingProgress, bookId: UUID) {
+        guard let data = try? JSONEncoder().encode(progress) else { return }
+        defaults.set(data, forKey: "cloudProgress_\(bookId.uuidString)")
     }
 
     // MARK: - Highlights

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-enum BookFormat: String {
+enum BookFormat: String, Codable {
     case epub, pdf
 
     init(fileName: String) {
@@ -28,7 +28,7 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     }
 }
 
-struct ReadingPosition: Codable {
+struct ReadingPosition: Codable, Equatable {
     var chapterIndex: Int
     var paragraphIndex: Int
     var globalWordIndex: Int

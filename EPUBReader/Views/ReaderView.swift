@@ -37,6 +37,10 @@ struct ReaderView: View {
         return min(100, max(0, current * 100 / total))
     }
 
+    private var latestCloudProgress: CloudReadingProgress? {
+        bookStore.newerCloudProgress(for: book)
+    }
+
     var body: some View {
         ZStack {
             theme.backgroundColor
@@ -252,32 +256,48 @@ struct ReaderView: View {
     }
 
     private var selectionActionsRow: some View {
-        HStack(spacing: 12) {
-            if hasTextSelection {
-                Button {
-                    if let nav = navigator, let sel = nav.currentSelection {
-                        startTTSFromSelection(sel)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                if hasTextSelection {
+                    Button {
+                        if let nav = navigator, let sel = nav.currentSelection {
+                            startTTSFromSelection(sel)
+                        }
+                    } label: {
+                        Label("Play from selection", systemImage: "text.line.first.and.arrowtriangle.forward")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color.accentColor))
+                            .foregroundStyle(.white)
                     }
+                }
+
+                Button {
+                    jumpToCurrentPosition()
                 } label: {
-                    Label("Play from selection", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    Label("Jump to position", systemImage: "scope")
                         .font(.subheadline.weight(.medium))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(Capsule().fill(Color.accentColor))
-                        .foregroundStyle(.white)
+                        .background(Capsule().fill(Color(.systemGray5)))
+                        .foregroundStyle(.primary)
+                }
+
+                if let latestCloudProgress {
+                    Button {
+                        jumpToCloudProgress(latestCloudProgress)
+                    } label: {
+                        Label(latestCloudProgress.pageLabel, systemImage: "icloud.and.arrow.down")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color(.systemGray5)))
+                            .foregroundStyle(.primary)
+                    }
                 }
             }
-
-            Button {
-                jumpToCurrentPosition()
-            } label: {
-                Label("Jump to position", systemImage: "scope")
-                    .font(.subheadline.weight(.medium))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Capsule().fill(Color(.systemGray5)))
-                    .foregroundStyle(.primary)
-            }
+            .padding(.horizontal, 20)
         }
     }
 
@@ -386,7 +406,11 @@ struct ReaderView: View {
                         currentVisibleAutoAdvanceTarget = visibleAutoAdvanceTarget(from: locator)
                     }
                     if let jsonString = locator.jsonString {
-                        UserDefaults.standard.set(jsonString, forKey: "locator_\(book.id.uuidString)")
+                        bookStore.saveEPUBLocator(
+                            book: book,
+                            locatorJSONString: jsonString,
+                            displayPage: displayPage(from: locator)
+                        )
                     }
                 },
                 onViewportChanged: { [self] viewport in
@@ -428,8 +452,12 @@ struct ReaderView: View {
     }
 
     private func savedLocator() -> Locator? {
-        guard let jsonString = UserDefaults.standard.string(forKey: "locator_\(book.id.uuidString)") else { return nil }
+        guard let jsonString = bookStore.getEPUBLocatorJSONString(bookId: book.id) else { return nil }
         return try? Locator(jsonString: jsonString)
+    }
+
+    private func displayPage(from locator: Locator) -> Int? {
+        locator.locations.position
     }
 
     /// Converts a point locator into a minimal visible target until viewport data arrives.
@@ -484,7 +512,11 @@ struct ReaderView: View {
             voiceId: bookStore.activeVoiceId,
             speed: currentSpeed,
             onPositionUpdate: { position in
-                bookStore.saveReadingPosition(bookId: book.id, position: position)
+                bookStore.saveReadingPosition(
+                    book: book,
+                    position: position,
+                    locatorJSONString: bookStore.getEPUBLocatorJSONString(bookId: book.id)
+                )
             }
         )
     }
@@ -643,11 +675,49 @@ struct ReaderView: View {
     }
 
     private func jumpToCurrentPosition() {
-        guard let nav = navigator, let parsedBook else { return }
-        let paraId = playbackManager.currentParagraphId
-        let wordIndex = playbackManager.currentGlobalWordIndex
+        jumpToPosition(paragraphId: playbackManager.currentParagraphId, wordIndex: playbackManager.currentGlobalWordIndex)
+    }
 
-        guard let paragraph = parsedBook.paragraph(withId: paraId),
+    private func jumpToCloudProgress(_ progress: CloudReadingProgress) {
+        guard progress.format == .epub else { return }
+        bookStore.applyCloudProgressLocally(progress, for: book)
+
+        if let position = progress.readingPosition {
+            restorePlaybackPosition(position)
+        }
+
+        if let locatorJSONString = progress.locatorJSONString,
+           let locator = try? Locator(jsonString: locatorJSONString) {
+            navigationTask?.cancel()
+            navigationTask = Task {
+                _ = await navigator?.go(to: locator, options: NavigatorGoOptions(animated: true))
+            }
+            return
+        }
+
+        if let position = progress.readingPosition,
+           let parsedBook,
+           let paragraph = parsedBook.flatParagraphs[safe: position.paragraphIndex] {
+            jumpToPosition(paragraphId: paragraph.id, wordIndex: position.globalWordIndex)
+        }
+    }
+
+    private func restorePlaybackPosition(_ position: ReadingPosition) {
+        guard let parsedBook, !parsedBook.flatParagraphs.isEmpty else { return }
+        let paragraphIndex = min(max(0, position.paragraphIndex), parsedBook.flatParagraphs.count - 1)
+        let paragraph = parsedBook.flatParagraphs[paragraphIndex]
+        playbackManager.restorePosition(
+            paragraphArrayIndex: paragraphIndex,
+            paragraphId: paragraph.id,
+            globalWordIndex: position.globalWordIndex
+        )
+        updateWordHighlight()
+    }
+
+    private func jumpToPosition(paragraphId: Int, wordIndex: Int) {
+        guard let nav = navigator, let parsedBook else { return }
+
+        guard let paragraph = parsedBook.paragraph(withId: paragraphId),
               let hrefURL = AnyURL(string: paragraph.resourceHref) else { return }
 
         let wordPosition = paragraph.position(ofGlobalWordId: wordIndex) ?? 0
