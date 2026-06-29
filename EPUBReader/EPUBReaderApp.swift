@@ -10,6 +10,7 @@ struct EPUBReaderApp: App {
                 LibraryView()
             }
             .environmentObject(bookStore)
+            .keepScreenAwake(bookStore.keepScreenAwake)
         }
     }
 }
