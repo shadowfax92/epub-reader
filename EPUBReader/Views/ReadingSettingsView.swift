@@ -35,6 +35,8 @@ struct ReadingSettingsView: View {
 
             Section {
                 Toggle("Keep Screen Awake", isOn: keepScreenAwakeBinding)
+            } header: {
+                Text("Display")
             } footer: {
                 Text("Prevents the screen from dimming or locking while the app is open. May use more battery.")
             }
