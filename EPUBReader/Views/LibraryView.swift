@@ -103,15 +103,7 @@ struct LibraryView: View {
         List {
             ForEach(bookStore.books) { book in
                 NavigationLink(value: book) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(book.title)
-                            .font(.headline)
-                            .lineLimit(2)
-                        Text(book.author)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 4)
+                    BookRowView(book: book)
                 }
             }
             .onDelete { indexSet in

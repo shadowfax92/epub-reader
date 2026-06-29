@@ -16,6 +16,7 @@ final class BookStoreImportTests: XCTestCase {
     override func tearDown() {
         UserDefaults.standard.removeObject(forKey: "autoAdvancePagesWithSpeech")
         UserDefaults.standard.removeObject(forKey: "autoAdvancePagesWithSpeechInPDF")
+        UserDefaults.standard.removeObject(forKey: "keepScreenAwake")
         super.tearDown()
     }
 
@@ -64,6 +65,32 @@ final class BookStoreImportTests: XCTestCase {
         XCTAssertFalse(reloaded.autoAdvancePagesWithSpeechInPDF)
         // The EPUB toggle is independent and unaffected.
         XCTAssertTrue(reloaded.autoAdvancePagesWithSpeech)
+    }
+
+    func testKeepScreenAwakeDefaultsOn() {
+        UserDefaults.standard.removeObject(forKey: "keepScreenAwake")
+        let store = BookStore()
+
+        XCTAssertTrue(store.keepScreenAwake)
+    }
+
+    func testKeepScreenAwakePersistsFalse() {
+        let store = BookStore()
+        store.keepScreenAwake = false
+
+        let reloaded = BookStore()
+
+        XCTAssertFalse(reloaded.keepScreenAwake)
+    }
+
+    func testKeepScreenAwakePersistsTrue() {
+        let store = BookStore()
+        store.keepScreenAwake = false
+        store.keepScreenAwake = true
+
+        let reloaded = BookStore()
+
+        XCTAssertTrue(reloaded.keepScreenAwake)
     }
 
     // MARK: - EPUB

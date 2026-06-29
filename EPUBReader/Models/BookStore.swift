@@ -133,6 +133,13 @@ class BookStore: ObservableObject {
         set { objectWillChange.send(); defaults.set(newValue.rawValue, forKey: "readerTheme") }
     }
 
+    /// When on, the device idle timer is disabled while the app is foregrounded so the
+    /// screen does not dim or auto-lock. Default on; the toggle is the user's opt-out.
+    var keepScreenAwake: Bool {
+        get { defaults.object(forKey: "keepScreenAwake") as? Bool ?? true }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "keepScreenAwake") }
+    }
+
     private let booksDirectoryURL: URL
     private let metadataFileURL: URL
 
@@ -189,6 +196,7 @@ class BookStore: ObservableObject {
 
         let title: String?
         let author: String?
+        let pdfPageCount: Int?
         switch BookFormat(fileName: fileName) {
         case .pdf:
             guard let document = PDFDocument(url: stagedURL) else {
@@ -200,11 +208,13 @@ class BookStore: ObservableObject {
             let parsed = PDFParserService.shared.parseMetadata(from: document)
             title = parsed.title
             author = parsed.author
+            pdfPageCount = document.pageCount > 0 ? document.pageCount : nil
         case .epub:
             let publication = try await ReadiumService.shared.openPublication(at: stagedURL)
             let parsed = EPUBParserService.shared.parseMetadata(from: stagedURL, publication: publication)
             title = parsed.title
             author = parsed.author
+            pdfPageCount = nil
         }
 
         let contentFingerprint = try? Self.contentFingerprint(for: stagedURL)
@@ -226,6 +236,9 @@ class BookStore: ObservableObject {
 
         books.insert(book, at: 0)
         saveBooks()
+        if let pdfPageCount {
+            setCachedPDFPageCount(pdfPageCount, bookId: book.id)
+        }
         return book
     }
 
@@ -318,6 +331,7 @@ class BookStore: ObservableObject {
         defaults.removeObject(forKey: "position_\(currentBook.id.uuidString)")
         defaults.removeObject(forKey: "highlights_\(currentBook.id.uuidString)")
         defaults.removeObject(forKey: "pdfPage_\(currentBook.id.uuidString)")
+        defaults.removeObject(forKey: "pdfPageCount_\(currentBook.id.uuidString)")
         defaults.removeObject(forKey: "locator_\(currentBook.id.uuidString)")
         defaults.removeObject(forKey: "cloudProgress_\(currentBook.id.uuidString)")
         defaults.removeObject(forKey: legacyCloudProgressBaselineKey(bookId: currentBook.id))
@@ -408,6 +422,53 @@ class BookStore: ObservableObject {
 
     func getEPUBLocatorJSONString(bookId: UUID) -> String? {
         defaults.string(forKey: "locator_\(bookId.uuidString)")
+    }
+
+    // MARK: - Reading progress (Library indicator)
+
+    /// Best-effort whole-book reading progress (0...1) for the Library row indicator.
+    /// EPUB resolves synchronously from the saved locator's `totalProgression`; PDF needs
+    /// the document's page count, which is loaded once off the main actor and cached.
+    /// Returns nil when the book hasn't been opened or progress can't be determined.
+    func progressFraction(for book: BookMetadata) async -> Double? {
+        let currentBook = currentBookMetadata(for: book)
+        switch currentBook.format {
+        case .epub:
+            return ReadingProgress.fraction(epubLocatorJSON: getEPUBLocatorJSONString(bookId: currentBook.id))
+        case .pdf:
+            guard let pageIndex = getPDFPage(bookId: currentBook.id) else { return nil }
+            let pageCount: Int?
+            if let cached = cachedPDFPageCount(bookId: currentBook.id) {
+                pageCount = cached
+            } else {
+                pageCount = await resolvePDFPageCount(for: currentBook)
+            }
+            return ReadingProgress.fraction(pdfPageIndex: pageIndex, pageCount: pageCount)
+        }
+    }
+
+    private func resolvePDFPageCount(for book: BookMetadata) async -> Int? {
+        guard let count = await Self.loadPDFPageCount(at: book.fileURL) else { return nil }
+        setCachedPDFPageCount(count, bookId: book.id)
+        return count
+    }
+
+    private func cachedPDFPageCount(bookId: UUID) -> Int? {
+        defaults.object(forKey: "pdfPageCount_\(bookId.uuidString)") as? Int
+    }
+
+    private func setCachedPDFPageCount(_ count: Int, bookId: UUID) {
+        defaults.set(count, forKey: "pdfPageCount_\(bookId.uuidString)")
+    }
+
+    /// Reads a PDF's page count off the main actor — `PDFDocument` parsing can touch disk,
+    /// and only the resulting `Int` crosses back, so the non-Sendable document never escapes.
+    nonisolated static func loadPDFPageCount(at url: URL) async -> Int? {
+        await Task.detached(priority: .utility) {
+            guard let document = PDFDocument(url: url) else { return nil }
+            let count = document.pageCount
+            return count > 0 ? count : nil
+        }.value
     }
 
     func newerCloudProgress(for book: BookMetadata) -> CloudReadingProgress? {
