@@ -33,6 +33,14 @@ struct ReadingSettingsView: View {
                 )
             }
 
+            Section {
+                Toggle("Keep Screen Awake", isOn: keepScreenAwakeBinding)
+            } header: {
+                Text("Display")
+            } footer: {
+                Text("Prevents the screen from dimming or locking while the app is open. May use more battery.")
+            }
+
             Section("Narration") {
                 Toggle("Auto-Advance Pages (EPUB)", isOn: autoAdvancePagesEPUBBinding)
                 Toggle("Auto-Advance Pages (PDF)", isOn: autoAdvancePagesPDFBinding)
@@ -63,6 +71,13 @@ struct ReadingSettingsView: View {
         Binding(
             get: { bookStore.autoAdvancePagesWithSpeechInPDF },
             set: { bookStore.autoAdvancePagesWithSpeechInPDF = $0 }
+        )
+    }
+
+    private var keepScreenAwakeBinding: Binding<Bool> {
+        Binding(
+            get: { bookStore.keepScreenAwake },
+            set: { bookStore.keepScreenAwake = $0 }
         )
     }
 }
