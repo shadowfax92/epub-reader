@@ -31,6 +31,17 @@ struct SettingsView: View {
                         detail: bookStore.readerTheme.label
                     )
                 }
+
+                NavigationLink {
+                    CloudSyncSettingsView()
+                } label: {
+                    settingsRow(
+                        title: "Cloud Sync",
+                        systemImage: "icloud.fill",
+                        tint: .blue,
+                        detail: bookStore.isCloudAvailable ? "iCloud" : "Off"
+                    )
+                }
             }
         }
         .navigationTitle("Settings")
