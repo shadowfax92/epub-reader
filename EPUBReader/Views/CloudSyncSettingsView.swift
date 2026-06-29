@@ -7,8 +7,9 @@ struct CloudSyncSettingsView: View {
     @State private var isSyncing = false
 
     var body: some View {
+        let isCloudAvailable = bookStore.isCloudAvailable
         Form {
-            statusSection
+            statusSection(isCloudAvailable: isCloudAvailable)
             booksSection
         }
         .navigationTitle("Cloud Sync")
@@ -16,13 +17,13 @@ struct CloudSyncSettingsView: View {
     }
 
     @ViewBuilder
-    private var statusSection: some View {
+    private func statusSection(isCloudAvailable: Bool) -> some View {
         Section {
             HStack(spacing: 12) {
-                icloudIcon
+                icloudIcon(isCloudAvailable: isCloudAvailable)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(bookStore.isCloudAvailable ? "iCloud Sync On" : "iCloud Unavailable")
-                    Text(availabilityDetail)
+                    Text(isCloudAvailable ? "iCloud Sync On" : "iCloud Unavailable")
+                    Text(availabilityDetail(isCloudAvailable: isCloudAvailable))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -51,7 +52,7 @@ struct CloudSyncSettingsView: View {
             }
             .disabled(isSyncing)
         } footer: {
-            Text("Reading progress syncs automatically as you read. Sync Now updates this device immediately.")
+            Text("Reading progress syncs automatically as you read. Sync Now uploads this device's latest progress to iCloud.")
         }
     }
 
@@ -70,19 +71,19 @@ struct CloudSyncSettingsView: View {
         }
     }
 
-    private var icloudIcon: some View {
-        Image(systemName: bookStore.isCloudAvailable ? "checkmark.icloud.fill" : "exclamationmark.icloud.fill")
+    private func icloudIcon(isCloudAvailable: Bool) -> some View {
+        Image(systemName: isCloudAvailable ? "checkmark.icloud.fill" : "exclamationmark.icloud.fill")
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: 28, height: 28)
             .background(
-                bookStore.isCloudAvailable ? Color.blue : Color.orange,
+                isCloudAvailable ? Color.blue : Color.orange,
                 in: RoundedRectangle(cornerRadius: 6, style: .continuous)
             )
     }
 
-    private var availabilityDetail: String {
-        bookStore.isCloudAvailable
+    private func availabilityDetail(isCloudAvailable: Bool) -> String {
+        isCloudAvailable
             ? "Your reading position syncs across your devices."
             : "Sign in to iCloud in Settings to sync your reading position."
     }

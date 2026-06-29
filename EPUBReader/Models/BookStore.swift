@@ -465,12 +465,18 @@ class BookStore: ObservableObject {
 
             let updatedAt = Self.realTimestamp(effective.updatedAt)
             let state: BookCloudSyncStatus.State
-            if updatedAt == nil || remote == nil {
+            if updatedAt == nil {
                 state = .pendingUpload
-            } else if remote!.isNewer(than: local) {
-                state = .updateAvailable
+            } else if let remote {
+                if remote.isNewer(than: local) {
+                    state = .updateAvailable
+                } else if let local, local.isNewer(than: remote) {
+                    state = .pendingUpload
+                } else {
+                    state = .upToDate
+                }
             } else {
-                state = .upToDate
+                state = .pendingUpload
             }
 
             return BookCloudSyncStatus(

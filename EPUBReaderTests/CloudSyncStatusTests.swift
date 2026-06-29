@@ -76,6 +76,23 @@ final class CloudSyncStatusTests: XCTestCase {
         XCTAssertEqual(status?.pageLabel, "Page 3")
     }
 
+    func testStatusIsPendingUploadWhenLocalIsNewerThanRemote() {
+        let (store, cloud, _) = makeStore()
+        let book = makeBook(title: "Local Ahead", fileName: "ahead.pdf")
+        store.books = [book]
+
+        store.savePDFPage(book: book, pageIndex: 6, updatedAt: Date(timeIntervalSince1970: 200))
+        cloud.save(
+            CloudReadingProgress(book: book, pageIndex: 1, updatedAt: Date(timeIntervalSince1970: 100)),
+            for: book
+        )
+
+        let status = store.cloudSyncStatuses().first
+        XCTAssertEqual(status?.state, .pendingUpload)
+        XCTAssertEqual(status?.pageLabel, "Page 7")
+        XCTAssertEqual(status?.updatedAt, Date(timeIntervalSince1970: 200))
+    }
+
     func testStatusesAreSortedMostRecentFirst() {
         let (store, _, _) = makeStore()
         let older = makeBook(title: "Older", fileName: "older.pdf")
