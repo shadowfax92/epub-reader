@@ -115,6 +115,13 @@ class BookStore: ObservableObject {
         set { objectWillChange.send(); defaults.set(newValue.rawValue, forKey: "readerTheme") }
     }
 
+    /// When on, the device idle timer is disabled while the app is foregrounded so the
+    /// screen does not dim or auto-lock. Default on; the toggle is the user's opt-out.
+    var keepScreenAwake: Bool {
+        get { defaults.object(forKey: "keepScreenAwake") as? Bool ?? true }
+        set { objectWillChange.send(); defaults.set(newValue, forKey: "keepScreenAwake") }
+    }
+
     private let booksDirectoryURL: URL
     private let metadataFileURL: URL
 
