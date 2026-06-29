@@ -3,6 +3,24 @@ import SwiftUI
 import PDFKit
 import ReadiumShared
 
+/// Per-book snapshot of how local reading progress relates to its iCloud record,
+/// rendered by the Cloud Sync settings page. `updatedAt` is nil when there is no
+/// real timestamp yet (a pre-sync baseline that hasn't been uploaded).
+struct BookCloudSyncStatus: Identifiable, Equatable, Sendable {
+    enum State: Sendable {
+        case upToDate          // local and iCloud agree
+        case updateAvailable   // iCloud holds a newer position (another device moved ahead)
+        case pendingUpload     // local progress not yet in iCloud
+    }
+
+    let book: BookMetadata
+    let pageLabel: String
+    let updatedAt: Date?
+    let state: State
+
+    var id: UUID { book.id }
+}
+
 @MainActor
 class BookStore: ObservableObject {
     @Published var books: [BookMetadata] = []
@@ -480,6 +498,102 @@ class BookStore: ObservableObject {
         saveLocalCloudProgress(local, bookId: currentBook.id)
         objectWillChange.send()
     }
+
+    // MARK: - Cloud Sync Status
+
+    /// Whether the device is signed into iCloud. A quick proxy for "can KV sync run",
+    /// surfaced only as a hint on the Cloud Sync page — never used for control flow.
+    var isCloudAvailable: Bool {
+        FileManager.default.ubiquityIdentityToken != nil
+    }
+
+    /// Wall-clock time of the last manual "Sync Now", or nil if it has never run.
+    var lastCloudSyncDate: Date? {
+        let timestamp = defaults.double(forKey: Self.lastCloudSyncKey)
+        return timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : nil
+    }
+
+    /// One status row per book that has any stored-local or iCloud progress, newest first.
+    /// Reads through BookStore so the private cloud store and the local/remote merge stay encapsulated.
+    func cloudSyncStatuses() -> [BookCloudSyncStatus] {
+        books.compactMap { book -> BookCloudSyncStatus? in
+            let current = currentBookMetadata(for: book)
+            let local = localCloudProgress(bookId: current.id)
+            let remote = cloudProgressStore.progress(for: current)
+            guard let effective = [local, remote].compactMap({ $0 }).max(by: { $0.updatedAt < $1.updatedAt }) else {
+                return nil
+            }
+
+            let updatedAt = Self.realTimestamp(effective.updatedAt)
+            let state: BookCloudSyncStatus.State
+            if updatedAt == nil {
+                state = .pendingUpload
+            } else if let remote {
+                if remote.isNewer(than: local) {
+                    state = .updateAvailable
+                } else if let local, local.isNewer(than: remote) {
+                    state = .pendingUpload
+                } else {
+                    state = .upToDate
+                }
+            } else {
+                state = .pendingUpload
+            }
+
+            return BookCloudSyncStatus(
+                book: current,
+                pageLabel: effective.pageLabel,
+                updatedAt: updatedAt,
+                state: state
+            )
+        }
+        .sorted(by: Self.sortByUpdatedAtDescending)
+    }
+
+    /// Flushes pending writes to iCloud and reconciles every book — pushing newer local
+    /// progress up and pulling newer remote progress down — then stamps the sync time.
+    @discardableResult
+    func forceCloudSync() -> Date {
+        cloudProgressStore.synchronize()
+        for book in books {
+            reconcileCloudProgress(for: book)
+        }
+        cloudProgressStore.synchronize()
+        let now = Date()
+        defaults.set(now.timeIntervalSince1970, forKey: Self.lastCloudSyncKey)
+        objectWillChange.send()
+        return now
+    }
+
+    private func reconcileCloudProgress(for book: BookMetadata) {
+        let current = currentBookMetadata(for: book)
+        let local = localCloudProgress(bookId: current.id)
+        let remote = cloudProgressStore.progress(for: current)
+
+        if let remote, remote.isNewer(than: local) {
+            applyCloudProgressLocally(remote, for: current)
+        } else if let local, Self.realTimestamp(local.updatedAt) != nil,
+                  remote == nil || local.isNewer(than: remote) {
+            // migrated(to:) realigns the bookKey in case a fingerprint backfill drifted it
+            // since the snapshot was stored, so the push isn't silently dropped.
+            cloudProgressStore.save(local.migrated(to: current), for: current)
+        }
+    }
+
+    private static func realTimestamp(_ date: Date) -> Date? {
+        date.timeIntervalSince1970 > 0 ? date : nil
+    }
+
+    private static func sortByUpdatedAtDescending(_ lhs: BookCloudSyncStatus, _ rhs: BookCloudSyncStatus) -> Bool {
+        switch (lhs.updatedAt, rhs.updatedAt) {
+        case let (l?, r?): return l > r
+        case (nil, _?): return false
+        case (_?, nil): return true
+        case (nil, nil): return lhs.book.title.localizedCaseInsensitiveCompare(rhs.book.title) == .orderedAscending
+        }
+    }
+
+    private static let lastCloudSyncKey = "lastCloudSyncAt"
 
     private func observeCloudProgressChanges() {
         cloudProgressObserver = notificationCenter.addObserver(
