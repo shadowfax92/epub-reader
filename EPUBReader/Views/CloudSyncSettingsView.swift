@@ -50,9 +50,9 @@ struct CloudSyncSettingsView: View {
                     Spacer()
                 }
             }
-            .disabled(isSyncing)
+            .disabled(isSyncing || !isCloudAvailable)
         } footer: {
-            Text("Reading progress syncs automatically as you read. Sync Now uploads this device's latest progress to iCloud.")
+            Text("Reading progress syncs automatically as you read. Use Sync Now to sync this device with iCloud.")
         }
     }
 
